@@ -48,7 +48,9 @@ read `.m-cli.toml` (that stays `m-cli`'s job, which passes resolved values down 
 | `--mirror` | `IRISSYNC_MIRROR` | `.m-cache` | mirror root directory |
 | `--type` | `IRISSYNC_TYPE` | `mac` | routine type: `mac` (UDL/ObjectScript), `int` (classic MUMPS — e.g. `^%RI`-loaded VistA), `inc` (includes) |
 | `--token` | `IRISSYNC_TOKEN` | — | OAuth2/bearer token (`Authorization: Bearer …`); wins over `--user`/`--password` |
+| `--token-file` | `IRISSYNC_TOKEN_FILE` | — | read the bearer token from a file (preferred — keeps it out of argv/env) |
 | `--user` / `--password` | `IRISSYNC_USER` / `IRISSYNC_PASSWORD` | — | basic auth |
+| `--password-file` | `IRISSYNC_PASSWORD_FILE` | — | read the password from a file (preferred over `--password`) |
 | `--ca-file` | `IRISSYNC_CA_FILE` | — | internal CA bundle (PEM) for in-boundary TLS |
 | `--client-cert` / `--client-key` | `IRISSYNC_CLIENT_CERT` / `_KEY` | — | mutual TLS |
 | `--concurrency` | — | `8` | parallel document GETs |
@@ -63,42 +65,57 @@ read `.m-cli.toml` (that stays `m-cli`'s job, which passes resolved values down 
 
 ## Enterprise & multi-instance auth
 
-For a developer working against the VA's enterprise-licensed IRIS across many
-dev / test / pre-prod VistA systems, don't authenticate tooling with a human,
-rotating password. The model that holds up:
+`irissync` is a **standalone, portable binary** — it round-trips routines out of
+an IRIS system on its own, configured entirely by flags + `IRISSYNC_*` env (with
+secrets sourced from files). It never depends on `m-cli`; an orchestrator like
+`m-cli` is an *optional* convenience for resolving per-instance profiles, not a
+requirement.
 
-- **Transport: mutual TLS.** Point `--ca-file` at the internal CA bundle and
-  `--client-cert`/`--client-key` at a PKI-issued client cert. The cert's
-  validity window (PKI-managed, scheduled renewal) replaces ad-hoc password
-  expiry, and it matches the in-boundary TLS posture.
-- **App auth: a bearer token, or a service account.** `--token`
-  (`IRISSYNC_TOKEN`) sends `Authorization: Bearer …` for an OAuth2/SSO-issued
-  token and **wins over** `--user`/`--password`. If you must use basic auth, use
-  a **least-privilege service identity per environment** (Atelier app role +
-  read on the routine DB) — not `_SYSTEM`, not your own login. On pre-prod,
-  scope it **read-only** (`pull` from pre-prod; `push` only to dev).
-- **Layering:** app auth (token or basic) rides on top of the optional mTLS
-  transport — set both. A `401` means app auth failed; a TLS error means the
-  transport/cert is wrong.
+For a developer working against the VA's enterprise-licensed IRIS (PIV/CAC +
+SSO, FedRAMP, on AWS) across many dev / test / pre-prod VistA systems, the model
+that holds up:
 
-**Many instances.** `irissync` is a pure per-invocation executor (flags +
-`IRISSYNC_*`), so per-instance config lives one layer up: define a profile per
-system and pass the resolved values in. Per `liberation-binary-design.md` §4,
-`m-cli` owns `.m-cli.toml` (`[iris.dev-a]`, `[iris.preprod]`, …) and invokes
-`irissync` with `--base-url`/`--namespace`/`--mirror`/cert paths. Keep
-**non-secret** connection params (URLs, namespaces, instance labels, cert
-*paths*) in that file; source **secrets/tokens/keys** from the OS keychain or a
-secret store at invocation — never commit them. The mirror is already
+- **Human path → bearer token.** A VA SSO (PIV-backed OIDC) token presented via
+  `--token-file` (or `--token`/`IRISSYNC_TOKEN`) as `Authorization: Bearer …`;
+  it **wins over** `--user`/`--password`. This is the realistic *human* path:
+  a PIV/CAC private key lives on the smartcard and **cannot be exported to a PEM
+  file**, so direct file-based mTLS with the PIV card is not possible — you
+  authenticate to the IdP with PIV and present the issued token. `irissync` does
+  not run the OIDC flow or refresh tokens (that stays outside the zero-dependency
+  binary); it just presents the token you supply. Pulls are fast, so short token
+  lifetimes are rarely a problem mid-operation.
+- **Service / CI path → mutual TLS.** `--ca-file` (internal CA bundle) +
+  `--client-cert`/`--client-key` for a **service or derived (PIV-D) certificate**
+  — not the PIV card. PKI-managed renewal replaces ad-hoc password expiry and
+  matches the in-boundary TLS posture.
+- **Least-privilege identity per environment.** Whichever app auth you use, scope
+  it to a dedicated read identity (Atelier app role + read on the routine DB) —
+  not `_SYSTEM`, not your own superuser login. On **pre-prod**, scope it
+  **read-only** (`pull` from pre-prod; `push` only to dev).
+- **Secrets by file, not argv/env.** Prefer `--token-file` / `--password-file`:
+  the secret never appears in a process listing or the environment. App auth
+  (token or basic) layers on top of the optional mTLS transport — set both. A
+  `401` means app auth failed; a TLS error means the transport/cert is wrong.
+
+**Many instances.** Because config is just flags + env + secret files, point
+`irissync` at each system with a per-instance shell profile / wrapper (or, if
+present, let `m-cli`'s `.m-cli.toml` resolve `[iris.dev-a]`, `[iris.preprod]`, …
+and invoke `irissync`). Keep **non-secret** params (URLs, namespaces, instance
+labels, cert/secret *paths*) in version control; keep the secret **files**
+themselves out (OS keychain / secret store / mounted path). The mirror is already
 `<instance>/<namespace>`-keyed, so every environment's tree and manifest coexist
 without collision.
 
 ```sh
-# one shell per target instance; certs + token by reference, not committed
+# one profile per target instance; secrets by file reference, never committed
 export IRISSYNC_BASE_URL=https://preprod-host:52773/api/atelier/v1/
 export IRISSYNC_INSTANCE=preprod IRISSYNC_NAMESPACE=VISTA
 export IRISSYNC_CA_FILE=/etc/va/ca-bundle.pem
+# service/CI cert (not a PIV card):
 export IRISSYNC_CLIENT_CERT=~/.irissync/preprod.crt IRISSYNC_CLIENT_KEY=~/.irissync/preprod.key
-export IRISSYNC_TOKEN="$(get-sso-token preprod)"      # from your secret store
+# human SSO token, written to a private file by your token helper:
+get-sso-token preprod > ~/.irissync/preprod.token   # mode 0600
+export IRISSYNC_TOKEN_FILE=~/.irissync/preprod.token
 irissync pull --type int
 ```
 

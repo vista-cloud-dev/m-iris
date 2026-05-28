@@ -31,7 +31,11 @@ func (listCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	if err := conn.Validate(config.Need{Network: true}); err != nil {
 		return usageErr(err)
 	}
-	client, err := atelier.New(conn.Atelier())
+	acfg, err := conn.Atelier()
+	if err != nil {
+		return usageErr(err)
+	}
+	client, err := atelier.New(acfg)
 	if err != nil {
 		return runtimeErr(err)
 	}
@@ -91,7 +95,11 @@ func (c *pullCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 		man.Instance, man.Namespace = conn.Instance, conn.Namespace
 	}
 
-	client, err := atelier.New(conn.Atelier())
+	acfg, err := conn.Atelier()
+	if err != nil {
+		return usageErr(err)
+	}
+	client, err := atelier.New(acfg)
 	if err != nil {
 		return runtimeErr(err)
 	}
@@ -262,7 +270,11 @@ func (statusCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	if err != nil {
 		return runtimeErr(err)
 	}
-	client, err := atelier.New(conn.Atelier())
+	acfg, err := conn.Atelier()
+	if err != nil {
+		return usageErr(err)
+	}
+	client, err := atelier.New(acfg)
 	if err != nil {
 		return runtimeErr(err)
 	}
