@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          check-latest: true
+      - name: lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+      - name: test
+        run: go test -race -cover ./...
+      - name: schema contract (must emit valid JSON)
+        run: go run . schema | python3 -m json.tool > /dev/null
+
+  build-matrix:
+    runs-on: ubuntu-latest
+    needs: lint-test
+    strategy:
+      matrix:
+        target:
+          - linux/amd64
+          - linux/arm64
+          - darwin/arm64
+          - windows/amd64
+    env:
+      CGO_ENABLED: '0' # static, no-libc (spec §10)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - name: build ${{ matrix.target }}
+        run: |
+          os=${{ matrix.target }}; GOOS=${os%/*} GOARCH=${os#*/} \
+            go build -trimpath -ldflags "-s -w" -o /dev/null .
