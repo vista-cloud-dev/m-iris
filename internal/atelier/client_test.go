@@ -117,6 +117,30 @@ func TestGetDocPercentRoutineEscaped(t *testing.T) {
 	}
 }
 
+func TestBearerTokenWinsOverBasic(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"status":{"errors":[]},"result":{"content":[]}}`))
+	}))
+	defer srv.Close()
+
+	// Both a token and basic creds are set; the token must win.
+	c, err := New(Config{
+		BaseURL: srv.URL + "/api/atelier/v1/", Namespace: "VISTA",
+		Token: "abc.def.ghi", User: "u", Password: "p",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := c.DocNames(context.Background(), "mac", ""); err != nil {
+		t.Fatalf("DocNames: %v", err)
+	}
+	if gotAuth != "Bearer abc.def.ghi" {
+		t.Errorf("Authorization = %q, want bearer token (not basic)", gotAuth)
+	}
+}
+
 func TestServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

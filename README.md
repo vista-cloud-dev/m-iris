@@ -47,6 +47,7 @@ read `.m-cli.toml` (that stays `m-cli`'s job, which passes resolved values down 
 | `--namespace` | `IRISSYNC_NAMESPACE` | — | IRIS namespace to liberate |
 | `--mirror` | `IRISSYNC_MIRROR` | `.m-cache` | mirror root directory |
 | `--type` | `IRISSYNC_TYPE` | `mac` | routine type: `mac` (UDL/ObjectScript), `int` (classic MUMPS — e.g. `^%RI`-loaded VistA), `inc` (includes) |
+| `--token` | `IRISSYNC_TOKEN` | — | OAuth2/bearer token (`Authorization: Bearer …`); wins over `--user`/`--password` |
 | `--user` / `--password` | `IRISSYNC_USER` / `IRISSYNC_PASSWORD` | — | basic auth |
 | `--ca-file` | `IRISSYNC_CA_FILE` | — | internal CA bundle (PEM) for in-boundary TLS |
 | `--client-cert` / `--client-key` | `IRISSYNC_CLIENT_CERT` / `_KEY` | — | mutual TLS |
@@ -59,6 +60,47 @@ read `.m-cli.toml` (that stays `m-cli`'s job, which passes resolved values down 
 
 `list` needs `--base-url` + `--namespace`; `verify` needs `--instance` +
 `--namespace`; `pull`/`status` need all three.
+
+## Enterprise & multi-instance auth
+
+For a developer working against the VA's enterprise-licensed IRIS across many
+dev / test / pre-prod VistA systems, don't authenticate tooling with a human,
+rotating password. The model that holds up:
+
+- **Transport: mutual TLS.** Point `--ca-file` at the internal CA bundle and
+  `--client-cert`/`--client-key` at a PKI-issued client cert. The cert's
+  validity window (PKI-managed, scheduled renewal) replaces ad-hoc password
+  expiry, and it matches the in-boundary TLS posture.
+- **App auth: a bearer token, or a service account.** `--token`
+  (`IRISSYNC_TOKEN`) sends `Authorization: Bearer …` for an OAuth2/SSO-issued
+  token and **wins over** `--user`/`--password`. If you must use basic auth, use
+  a **least-privilege service identity per environment** (Atelier app role +
+  read on the routine DB) — not `_SYSTEM`, not your own login. On pre-prod,
+  scope it **read-only** (`pull` from pre-prod; `push` only to dev).
+- **Layering:** app auth (token or basic) rides on top of the optional mTLS
+  transport — set both. A `401` means app auth failed; a TLS error means the
+  transport/cert is wrong.
+
+**Many instances.** `irissync` is a pure per-invocation executor (flags +
+`IRISSYNC_*`), so per-instance config lives one layer up: define a profile per
+system and pass the resolved values in. Per `liberation-binary-design.md` §4,
+`m-cli` owns `.m-cli.toml` (`[iris.dev-a]`, `[iris.preprod]`, …) and invokes
+`irissync` with `--base-url`/`--namespace`/`--mirror`/cert paths. Keep
+**non-secret** connection params (URLs, namespaces, instance labels, cert
+*paths*) in that file; source **secrets/tokens/keys** from the OS keychain or a
+secret store at invocation — never commit them. The mirror is already
+`<instance>/<namespace>`-keyed, so every environment's tree and manifest coexist
+without collision.
+
+```sh
+# one shell per target instance; certs + token by reference, not committed
+export IRISSYNC_BASE_URL=https://preprod-host:52773/api/atelier/v1/
+export IRISSYNC_INSTANCE=preprod IRISSYNC_NAMESPACE=VISTA
+export IRISSYNC_CA_FILE=/etc/va/ca-bundle.pem
+export IRISSYNC_CLIENT_CERT=~/.irissync/preprod.crt IRISSYNC_CLIENT_KEY=~/.irissync/preprod.key
+export IRISSYNC_TOKEN="$(get-sso-token preprod)"      # from your secret store
+irissync pull --type int
+```
 
 ## Mirror layout
 

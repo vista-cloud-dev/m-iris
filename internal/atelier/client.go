@@ -24,7 +24,8 @@ const maxResponse = 64 << 20 // 64 MiB
 type Config struct {
 	BaseURL    string // e.g. https://host:52773/api/atelier/v1/
 	Namespace  string // IRIS namespace
-	User       string // basic-auth user (optional when using mTLS)
+	Token      string // OAuth2/bearer token (app auth; wins over basic auth)
+	User       string // basic-auth user (optional when using a token or mTLS)
 	Password   string // basic-auth password
 	CAFile     string // PEM bundle for in-boundary TLS (optional)
 	ClientCert string // client cert (PEM) for mutual TLS (optional)
@@ -36,6 +37,7 @@ type Config struct {
 type Client struct {
 	base      *url.URL
 	namespace string
+	token     string
 	user      string
 	password  string
 	hc        *http.Client
@@ -92,6 +94,7 @@ func New(cfg Config) (*Client, error) {
 	return &Client{
 		base:      base,
 		namespace: cfg.Namespace,
+		token:     cfg.Token,
 		user:      cfg.User,
 		password:  cfg.Password,
 		hc: &http.Client{
@@ -127,7 +130,12 @@ func (c *Client) get(ctx context.Context, u *url.URL, out *Envelope) error {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
-	if c.user != "" {
+	// App auth: a bearer token wins over basic auth; either rides on top of the
+	// (optional) mTLS transport.
+	switch {
+	case c.token != "":
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	case c.user != "":
 		req.SetBasicAuth(c.user, c.password)
 	}
 

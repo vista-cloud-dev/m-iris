@@ -21,6 +21,7 @@ type Conn struct {
 	Namespace   string `env:"IRISSYNC_NAMESPACE" help:"IRIS namespace to liberate." placeholder:"NS"`
 	Mirror      string `env:"IRISSYNC_MIRROR" default:".m-cache" help:"Mirror root directory."`
 	Type        string `env:"IRISSYNC_TYPE" enum:"mac,int,inc" default:"mac" help:"Routine type to liberate: mac (UDL/ObjectScript), int (classic MUMPS — e.g. ^%RI-loaded VistA), or inc (includes)."`
+	Token       string `env:"IRISSYNC_TOKEN" help:"OAuth2/bearer token for Atelier (sent as 'Authorization: Bearer …'; wins over --user/--password)." placeholder:"TOKEN"`
 	User        string `env:"IRISSYNC_USER" help:"Atelier username (basic auth)."`
 	Password    string `env:"IRISSYNC_PASSWORD" help:"Atelier password (basic auth)."`
 	CAFile      string `name:"ca-file" env:"IRISSYNC_CA_FILE" help:"Internal CA bundle (PEM) for in-boundary TLS." placeholder:"PATH"`
@@ -66,6 +67,7 @@ func (c *Conn) Atelier() atelier.Config {
 	return atelier.Config{
 		BaseURL:    c.BaseURL,
 		Namespace:  c.Namespace,
+		Token:      c.Token,
 		User:       c.User,
 		Password:   c.Password,
 		CAFile:     c.CAFile,
