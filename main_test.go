@@ -38,7 +38,7 @@ func fakeAtelier(content map[string][]string, ts map[string]string) *httptest.Se
 				fmt.Fprintf(&sb, `{"name":%q,"cat":"RTN","ts":%q}`, name, ts[name])
 			}
 			sb.WriteString(`]}}`)
-			io.WriteString(w, sb.String())
+			_, _ = io.WriteString(w, sb.String())
 
 		case strings.Contains(r.URL.Path, "/doc/"):
 			// r.URL.Path is already percent-decoded by net/http, so "%25ZV.mac"
@@ -47,7 +47,7 @@ func fakeAtelier(content map[string][]string, ts map[string]string) *httptest.Se
 			lines, ok := content[name]
 			if !ok {
 				w.WriteHeader(http.StatusInternalServerError)
-				io.WriteString(w, `{"status":{"errors":[{"error":"does not exist"}]}}`)
+				_, _ = io.WriteString(w, `{"status":{"errors":[{"error":"does not exist"}]}}`)
 				return
 			}
 			var sb strings.Builder
@@ -60,7 +60,7 @@ func fakeAtelier(content map[string][]string, ts map[string]string) *httptest.Se
 				sb.Write(b)
 			}
 			sb.WriteString(`]}}`)
-			io.WriteString(w, sb.String())
+			_, _ = io.WriteString(w, sb.String())
 
 		default:
 			w.WriteHeader(http.StatusNotFound)

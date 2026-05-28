@@ -14,3 +14,7 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # Internal reusable workflow, pinned at @main and managed by hand;
+      # Dependabot can't reach the private .github repo to check it.
+      - dependency-name: "vista-cloud-dev/.github*"
