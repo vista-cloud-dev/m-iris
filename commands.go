@@ -35,7 +35,7 @@ func (listCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	if err != nil {
 		return runtimeErr(err)
 	}
-	docs, err := client.DocNames(context.Background(), "")
+	docs, err := client.DocNames(context.Background(), conn.Type, "")
 	if err != nil {
 		return runtimeErr(err)
 	}
@@ -96,7 +96,7 @@ func (c *pullCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 		return runtimeErr(err)
 	}
 	ctx := context.Background()
-	docs, err := client.DocNames(ctx, "")
+	docs, err := client.DocNames(ctx, conn.Type, "")
 	if err != nil {
 		return runtimeErr(err)
 	}
@@ -108,20 +108,40 @@ func (c *pullCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	diff := manifest.Compare(server, man)
 
 	toFetch := diff.ToPull()
+	healed := 0
 	if c.Full {
 		toFetch = docNames(sel)
+	} else {
+		// Self-heal: also re-fetch unchanged routines whose mirror file is
+		// missing (deleted / partial write). Cheap stat per routine. Content
+		// tampering (file present but hash differs) is caught by `verify` and
+		// repaired by `pull --full` — re-hashing every file each pull is too
+		// costly at namespace scale.
+		inFetch := make(map[string]bool, len(toFetch))
+		for _, n := range toFetch {
+			inFetch[n] = true
+		}
+		for _, n := range diff.Unchanged {
+			if _, statErr := os.Stat(layout.RoutinePath(n)); os.IsNotExist(statErr) && !inFetch[n] {
+				toFetch = append(toFetch, n)
+				inFetch[n] = true
+				healed++
+			}
+		}
+		sort.Strings(toFetch)
 	}
+	unchanged := len(diff.Unchanged) - healed
 	toDelete := diff.Deleted
 
 	if conn.DryRun {
 		return cc.Result(pullResult{
 			Namespace: conn.Namespace, Mirror: layout.NamespaceDir(),
-			Fetched: len(toFetch), Unchanged: len(diff.Unchanged), Deleted: len(toDelete), DryRun: true,
+			Fetched: len(toFetch), Unchanged: unchanged, Deleted: len(toDelete), DryRun: true,
 		}, func() {
 			cc.Title(conn.Namespace + " — pull plan (dry run)")
 			cc.KV(
 				[2]string{"to fetch", fmt.Sprint(len(toFetch))},
-				[2]string{"unchanged", fmt.Sprint(len(diff.Unchanged))},
+				[2]string{"unchanged", fmt.Sprint(unchanged)},
 				[2]string{"to delete", fmt.Sprint(len(toDelete))},
 				[2]string{"mirror", layout.NamespaceDir()},
 			)
@@ -145,12 +165,12 @@ func (c *pullCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 
 	return cc.Result(pullResult{
 		Namespace: conn.Namespace, Mirror: layout.NamespaceDir(),
-		Fetched: fetched, Unchanged: len(diff.Unchanged), Deleted: len(toDelete), Bytes: totalBytes,
+		Fetched: fetched, Unchanged: unchanged, Deleted: len(toDelete), Bytes: totalBytes,
 	}, func() {
 		cc.Title(conn.Namespace + " — pull complete")
 		cc.KV(
 			[2]string{"fetched", fmt.Sprint(fetched)},
-			[2]string{"unchanged", fmt.Sprint(len(diff.Unchanged))},
+			[2]string{"unchanged", fmt.Sprint(unchanged)},
 			[2]string{"deleted", fmt.Sprint(len(toDelete))},
 			[2]string{"bytes", fmt.Sprint(totalBytes)},
 			[2]string{"mirror", layout.NamespaceDir()},
@@ -246,7 +266,7 @@ func (statusCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	if err != nil {
 		return runtimeErr(err)
 	}
-	docs, err := client.DocNames(context.Background(), "")
+	docs, err := client.DocNames(context.Background(), conn.Type, "")
 	if err != nil {
 		return runtimeErr(err)
 	}
@@ -257,7 +277,7 @@ func (statusCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	d := manifest.Compare(tsMap(sel), man)
 	res := statusResult{
 		Namespace: conn.Namespace,
-		New:       d.New, Changed: d.Changed, Deleted: d.Deleted,
+		New:       nonNil(d.New), Changed: nonNil(d.Changed), Deleted: nonNil(d.Deleted),
 		Unchanged: len(d.Unchanged), Drift: d.Drift(),
 	}
 	return report(cc, res, func() {
@@ -321,7 +341,7 @@ func (verifyCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	drift := len(mismatch)+len(missing) > 0
 	res := verifyResult{
 		Namespace: conn.Namespace,
-		Checked:   len(names), OK: okCount, Mismatch: mismatch, Missing: missing,
+		Checked:   len(names), OK: okCount, Mismatch: nonNil(mismatch), Missing: nonNil(missing),
 	}
 	return report(cc, res, func() {
 		cc.Title(conn.Namespace + " — verify mirror")
@@ -351,6 +371,15 @@ func report(cc *clikit.Context, data any, text func(), drift bool, code, summary
 		return clikit.Fail(clikit.ExitCheck, code, summary, hint)
 	}
 	return nil
+}
+
+// nonNil returns s, or an empty (non-nil) slice so the JSON envelope renders an
+// empty list as [] rather than null.
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func runtimeErr(err error) error {

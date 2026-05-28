@@ -7,12 +7,16 @@ import (
 	"net/url"
 )
 
-// DocNames lists routine documents (cat=RTN, type=mac) in the namespace.
-// Generated documents are excluded; the optional server-side filter is a SQL
-// match expression. irissync also filters client-side (glob + package prefix),
-// so callers may pass "" here and filter the returned slice instead.
-func (c *Client) DocNames(ctx context.Context, filter string) ([]DocName, error) {
-	u := c.endpoint(c.namespace, "docnames", "RTN", "mac")
+// DocNames lists routine documents (cat=RTN) of the given type ("mac", "int",
+// or "inc"; defaults to "mac") in the namespace. Generated documents are
+// excluded; the optional server-side filter is a SQL match expression.
+// irissync also filters client-side (glob + package prefix), so callers may
+// pass "" for filter and narrow the returned slice instead.
+func (c *Client) DocNames(ctx context.Context, routineType, filter string) ([]DocName, error) {
+	if routineType == "" {
+		routineType = "mac"
+	}
+	u := c.endpoint(c.namespace, "docnames", "RTN", routineType)
 	q := url.Values{}
 	q.Set("generated", "0")
 	if filter != "" {

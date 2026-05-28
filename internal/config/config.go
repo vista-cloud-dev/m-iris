@@ -20,6 +20,7 @@ type Conn struct {
 	Instance    string `env:"IRISSYNC_INSTANCE" help:"Instance label used in the mirror path." placeholder:"NAME"`
 	Namespace   string `env:"IRISSYNC_NAMESPACE" help:"IRIS namespace to liberate." placeholder:"NS"`
 	Mirror      string `env:"IRISSYNC_MIRROR" default:".m-cache" help:"Mirror root directory."`
+	Type        string `env:"IRISSYNC_TYPE" enum:"mac,int,inc" default:"mac" help:"Routine type to liberate: mac (UDL/ObjectScript), int (classic MUMPS — e.g. ^%RI-loaded VistA), or inc (includes)."`
 	User        string `env:"IRISSYNC_USER" help:"Atelier username (basic auth)."`
 	Password    string `env:"IRISSYNC_PASSWORD" help:"Atelier password (basic auth)."`
 	CAFile      string `name:"ca-file" env:"IRISSYNC_CA_FILE" help:"Internal CA bundle (PEM) for in-boundary TLS." placeholder:"PATH"`

@@ -212,3 +212,65 @@ func TestFilterSelectsSubset(t *testing.T) {
 		t.Errorf("XUSER.mac should be filtered out (err=%v)", err)
 	}
 }
+
+func TestPullSelfHealsMissingFile(t *testing.T) {
+	srv := fakeAtelier(
+		map[string][]string{"A.mac": {"A ;x", " q"}, "B.mac": {"B ;y", " q"}},
+		map[string]string{"A.mac": "t1", "B.mac": "t2"},
+	)
+	defer srv.Close()
+	conn := &config.Conn{
+		BaseURL: srv.URL + "/api/atelier/v1/", Instance: "i", Namespace: "VISTA",
+		Mirror: t.TempDir(), Concurrency: 2, Type: "mac",
+	}
+	cc, _ := jsonCtx()
+	if err := (&pullCmd{}).Run(cc, conn); err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	// Delete a mirror file behind the manifest's back; the server is unchanged.
+	if err := os.Remove(conn.Layout().RoutinePath("A.mac")); err != nil {
+		t.Fatal(err)
+	}
+	cc, buf := jsonCtx()
+	if err := (&pullCmd{}).Run(cc, conn); err != nil {
+		t.Fatalf("self-heal pull: %v", err)
+	}
+	var env struct {
+		Data pullResult `json:"data"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v\n%s", err, buf.String())
+	}
+	if env.Data.Fetched != 1 || env.Data.Unchanged != 1 {
+		t.Errorf("self-heal: fetched=%d unchanged=%d, want 1/1", env.Data.Fetched, env.Data.Unchanged)
+	}
+	if _, err := os.Stat(conn.Layout().RoutinePath("A.mac")); err != nil {
+		t.Errorf("deleted file not re-fetched: %v", err)
+	}
+}
+
+func TestStatusEmptyListsRenderAsArrays(t *testing.T) {
+	srv := fakeAtelier(
+		map[string][]string{"A.mac": {"x"}},
+		map[string]string{"A.mac": "t1"},
+	)
+	defer srv.Close()
+	conn := &config.Conn{
+		BaseURL: srv.URL + "/api/atelier/v1/", Instance: "i", Namespace: "VISTA",
+		Mirror: t.TempDir(), Concurrency: 2, Type: "mac",
+	}
+	cc, _ := jsonCtx()
+	if err := (&pullCmd{}).Run(cc, conn); err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	cc, buf := jsonCtx()
+	if err := (statusCmd{}).Run(cc, conn); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	// In sync: new/changed/deleted must be [] (not null) for clean consumers.
+	for _, want := range []string{`"new": []`, `"changed": []`, `"deleted": []`} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("expected %s in envelope, got:\n%s", want, buf.String())
+		}
+	}
+}

@@ -46,6 +46,7 @@ read `.m-cli.toml` (that stays `m-cli`'s job, which passes resolved values down 
 | `--instance` | `IRISSYNC_INSTANCE` | — | instance label used in the mirror path |
 | `--namespace` | `IRISSYNC_NAMESPACE` | — | IRIS namespace to liberate |
 | `--mirror` | `IRISSYNC_MIRROR` | `.m-cache` | mirror root directory |
+| `--type` | `IRISSYNC_TYPE` | `mac` | routine type: `mac` (UDL/ObjectScript), `int` (classic MUMPS — e.g. `^%RI`-loaded VistA), `inc` (includes) |
 | `--user` / `--password` | `IRISSYNC_USER` / `IRISSYNC_PASSWORD` | — | basic auth |
 | `--ca-file` | `IRISSYNC_CA_FILE` | — | internal CA bundle (PEM) for in-boundary TLS |
 | `--client-cert` / `--client-key` | `IRISSYNC_CLIENT_CERT` / `_KEY` | — | mutual TLS |
@@ -97,6 +98,24 @@ also the conflict-check basis for the future `push`). One entry per routine:
 ```
 
 Keys marshal in sorted order, so the file diffs cleanly in git.
+
+### Routine type — `.mac` vs `.int` (VistA)
+
+On a VistA loaded into IRIS via `^%RI`, the routine **source** is stored as
+`.int` (classic MUMPS), not `.mac` — `GET doc/DGREG.mac` is a 404 while
+`docnames/RTN/int` lists ~34k real routines. The "never pull `.int`" rule in
+`liberation-binary-design.md` is correct for ObjectScript (where `.int` is
+compiler output) but not for `^%RI`-loaded VistA, where `.int` *is* the source.
+Use `--type int` for such instances (default stays `mac`). Validated 2026-05-27
+against a live IRIS-for-Health VistA: `pull --type int --filter 'DG*'`
+materialized 1,484 routines (6.2 MB) in ~3.5 s; `status`/`verify` clean.
+
+### Repair semantics
+
+`pull` is incremental against the manifest. It **self-heals a deleted/partial
+mirror file** (re-fetched on the next `pull`), but content **tampering** (file
+present, hash differs) is intentionally *not* re-hashed on every pull — `verify`
+detects it (exit 3) and `pull --full` repairs it.
 
 ## Output contract and exit codes
 

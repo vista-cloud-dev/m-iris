@@ -31,7 +31,7 @@ func TestDocNames(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv)
-	docs, err := c.DocNames(context.Background(), "")
+	docs, err := c.DocNames(context.Background(), "mac", "")
 	if err != nil {
 		t.Fatalf("DocNames: %v", err)
 	}
@@ -49,12 +49,31 @@ func TestDocNames(t *testing.T) {
 	}
 }
 
+func TestDocNamesTypeInPath(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"status":{"errors":[]},"result":{"content":[{"name":"DGREG.int","cat":"RTN","ts":"t"}]}}`))
+	}))
+	defer srv.Close()
+	docs, err := newTestClient(t, srv).DocNames(context.Background(), "int", "")
+	if err != nil {
+		t.Fatalf("DocNames: %v", err)
+	}
+	if gotPath != "/api/atelier/v1/VISTA/docnames/RTN/int" {
+		t.Errorf("path = %q, want .../RTN/int", gotPath)
+	}
+	if len(docs) != 1 || docs[0].Name != "DGREG.int" {
+		t.Fatalf("unexpected docs: %+v", docs)
+	}
+}
+
 func TestDocNamesBareArray(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"status":{"errors":[]},"result":[{"name":"A.mac"}]}`))
 	}))
 	defer srv.Close()
-	docs, err := newTestClient(t, srv).DocNames(context.Background(), "")
+	docs, err := newTestClient(t, srv).DocNames(context.Background(), "mac", "")
 	if err != nil {
 		t.Fatalf("DocNames: %v", err)
 	}
@@ -104,7 +123,7 @@ func TestServerError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":{"errors":[{"error":"namespace UNKNOWN does not exist","code":"5001"}]}}`))
 	}))
 	defer srv.Close()
-	_, err := newTestClient(t, srv).DocNames(context.Background(), "")
+	_, err := newTestClient(t, srv).DocNames(context.Background(), "mac", "")
 	if err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Fatalf("expected server error surfaced, got %v", err)
 	}
@@ -115,7 +134,7 @@ func TestUnauthorized(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer srv.Close()
-	_, err := newTestClient(t, srv).DocNames(context.Background(), "")
+	_, err := newTestClient(t, srv).DocNames(context.Background(), "mac", "")
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("expected 401 error, got %v", err)
 	}
