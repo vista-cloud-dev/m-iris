@@ -3,8 +3,7 @@ Copyright 2026 vista-cloud-dev
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
-irissync is the IRIS source-sync binary for the m-cli Go toolchain — the sole
-owner of the IRIS source boundary (materialize routine source → .mac mirror,
-and write-back). It was scaffolded from go-cli-template. Go binaries built from
-it are Apache-2.0 (per-tier license split — see host-side-go-toolchain-adr.md
-§3.2).
+irissync is a standalone, read-only tool that liberates IRIS routine source to
+the filesystem (materialize routine source → mirror + manifest; never writes to
+IRIS). It was scaffolded from go-cli-template. Go binaries built from it are
+Apache-2.0 (per-tier license split — see host-side-go-toolchain-adr.md §3.2).

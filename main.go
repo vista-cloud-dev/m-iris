@@ -1,7 +1,9 @@
-// Command irissync is the IRIS-specific source-sync binary: the sole owner of
-// the IRIS source boundary. This build implements the read side — the P0
-// source-axis gate — materializing IRIS routine source into a git-friendly
-// .mac mirror and verifying it. Write-back (`push`) lands in stage 2.1.
+// Command irissync is a standalone, read-only tool that liberates IRIS routine
+// source to the filesystem: it materializes the M routines of a namespace into
+// a git-friendly mirror + manifest and verifies drift. It is safe by
+// construction — every IRIS operation is a read (GET) over the Atelier REST
+// API; the only writes are to the local mirror. Write-back (`push`) is a
+// separate, future component, deliberately not part of this binary.
 //
 //	irissync list      inventory server docnames (connectivity/auth smoke test)
 //	irissync pull      DB → .mac mirror + manifest, incremental

@@ -1,15 +1,24 @@
 # irissync
 
-**The IRIS source-sync binary — the sole owner of the IRIS source boundary.**
-`irissync` materializes IRIS routine source into a git-friendly `.mac` mirror
-(and, in a later stage, writes edited `.mac` back). It is deliberately *outside*
-the `m-*` family: `m-cli` never speaks Atelier — it consumes the mirror as
-ordinary files and shells out to `irissync` for anything that touches the DB.
+**A standalone, read-only tool that liberates IRIS routine source to the
+filesystem.** `irissync` materializes the M routines of an IRIS namespace into a
+git-friendly mirror tree + a verifiable manifest, and tells you when the mirror
+has drifted. It is **safe by construction: it never writes to IRIS** — every
+operation is a read (`GET`) over the Atelier REST API; the only thing it writes
+is the local mirror.
 
-> **This build is the read side — the P0 source-axis gate** (stage 0.3 of the
+It is a **self-contained binary** — configured entirely by flags + `IRISSYNC_*`
+env (secrets optionally from files), with no dependency on the wider `m-cli`
+suite. File-based tooling then consumes the mirror as ordinary files.
+
+> **Scope:** this is the **read / liberation** half — `list`, `pull`, `status`,
+> `verify`. Write-back (`push`) is intentionally **not** part of this tool today;
+> it is a separate, future component (design:
+> [`liberation-binary-design.md`](../vista-dev-bridge/docs/liberation-binary-design.md);
+> tracked as stage 2.1 of the
 > [m-cli Go toolchain plan](../vista-dev-bridge/docs/m-cli-go-toolchain-implementation-plan.md)).
-> `push` (write-back + single-writer lock) lands in stage 2.1. Design:
-> [`liberation-binary-design.md`](../vista-dev-bridge/docs/liberation-binary-design.md).
+> Keeping this binary read-only is the point: it's the "safe" tool you can run
+> against dev/test/pre-prod systems with zero risk to the source.
 
 ```sh
 export IRISSYNC_BASE_URL=https://host:52773/api/atelier/v1/
@@ -122,14 +131,20 @@ irissync pull --type int
 ## Mirror layout
 
 ```
-<mirror>/<instance>/<namespace>/<ROUTINE>.mac
+<mirror>/<instance>/<namespace>/<ROUTINE>.<type>     # e.g. DGREG.int, %ZSTART.mac
 <mirror>/<instance>/<namespace>/.irissync-manifest.json
 ```
 
+The `<mirror>` root defaults to **`.m-cache`** *relative to the current
+directory* (`--mirror` / `IRISSYNC_MIRROR` to change it — use an absolute path
+for a stable location); `<instance>` and `<namespace>` come from their flags.
+Each file is named for the server docname; the `<type>` suffix follows `--type`
+(`int` for `^%RI`-loaded VistA, `mac` for ObjectScript — see below).
+
 Writes are **atomic** (temp + rename) and normalize line endings to `\n` so the
-tree is git-stable and `tree-sitter-m`-parseable. Export is **plain UDL/Atelier
-`.mac`** — the XML `$SYSTEM.OBJ.Export` wrapper is refused; `.int` is never
-pulled; `.cls` is out of scope.
+tree is git-stable and `tree-sitter-m`-parseable. Source is fetched as **plain
+UDL/Atelier text** — the XML `$SYSTEM.OBJ.Export` wrapper is refused; `.cls`
+(ObjectScript classes) is out of scope.
 
 > **Layout note:** [design §2.1](../vista-dev-bridge/docs/liberation-binary-design.md)
 > illustrates an extra `<package>` path segment. Deriving a VistA package from a
