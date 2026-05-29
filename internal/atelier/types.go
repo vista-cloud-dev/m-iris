@@ -1,8 +1,9 @@
 // Package atelier is the InterSystems Atelier REST API v1 client used by
-// irissync to read IRIS routine source. It speaks only the read-side endpoints
-// needed by the source-axis gate (docnames + doc); write-back (PUT + compile)
-// lands with `irissync push` (stage 2.1). Implementation uses net/http +
-// crypto/tls + crypto/x509 + encoding/json — no third-party HTTP/TLS/JSON.
+// irissync to read and write IRIS routine source. It speaks the read-side
+// endpoints needed by the source-axis gate (docnames + GET doc) and the
+// write-back endpoints used by `irissync push` (PUT doc + action/compile).
+// Implementation uses net/http + crypto/tls + crypto/x509 + encoding/json —
+// no third-party HTTP/TLS/JSON.
 package atelier
 
 import "encoding/json"

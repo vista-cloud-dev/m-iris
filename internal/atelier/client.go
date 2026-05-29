@@ -1,6 +1,7 @@
 package atelier
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -125,11 +126,26 @@ func (c *Client) endpoint(segments ...string) *url.URL {
 // get issues a GET and decodes the Atelier envelope into out, mapping HTTP and
 // server-side (status.errors) failures to a Go error.
 func (c *Client) get(ctx context.Context, u *url.URL, out *Envelope) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	return c.do(ctx, http.MethodGet, u, nil, out)
+}
+
+// do issues an HTTP request with an optional JSON body and decodes the Atelier
+// envelope into out, mapping HTTP and server-side (status.errors) failures to a
+// Go error. It is the single request path for both the read (GET) and write
+// (PUT/POST) sides, so auth, the response cap, and error mapping are identical.
+func (c *Client) do(ctx context.Context, method string, u *url.URL, body []byte, out *Envelope) error {
+	var rdr io.Reader
+	if body != nil {
+		rdr = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), rdr)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	// App auth: a bearer token wins over basic auth; either rides on top of the
 	// (optional) mTLS transport.
 	switch {
@@ -141,7 +157,7 @@ func (c *Client) get(ctx context.Context, u *url.URL, out *Envelope) error {
 
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("atelier: GET %s: %w", u.Path, err)
+		return fmt.Errorf("atelier: %s %s: %w", method, u.Path, err)
 	}
 	defer resp.Body.Close()
 
@@ -158,18 +174,18 @@ func (c *Client) get(ctx context.Context, u *url.URL, out *Envelope) error {
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
 			if resp.StatusCode >= 400 {
-				return fmt.Errorf("atelier: GET %s: HTTP %d", u.Path, resp.StatusCode)
+				return fmt.Errorf("atelier: %s %s: HTTP %d", method, u.Path, resp.StatusCode)
 			}
 			return fmt.Errorf("atelier: decode response from %s: %w", u.Path, err)
 		}
 	} else if resp.StatusCode >= 400 {
-		return fmt.Errorf("atelier: GET %s: HTTP %d", u.Path, resp.StatusCode)
+		return fmt.Errorf("atelier: %s %s: HTTP %d", method, u.Path, resp.StatusCode)
 	}
 	if err := out.Status.firstError(); err != nil {
 		return fmt.Errorf("atelier: %s: %w", u.Path, err)
 	}
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("atelier: GET %s: HTTP %d", u.Path, resp.StatusCode)
+		return fmt.Errorf("atelier: %s %s: HTTP %d", method, u.Path, resp.StatusCode)
 	}
 	return nil
 }

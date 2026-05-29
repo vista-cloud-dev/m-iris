@@ -3,7 +3,13 @@ Copyright 2026 vista-cloud-dev
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
-irissync is a standalone, read-only tool that liberates IRIS routine source to
-the filesystem (materialize routine source → mirror + manifest; never writes to
-IRIS). It was scaffolded from go-cli-template. Go binaries built from it are
-Apache-2.0 (per-tier license split — see host-side-go-toolchain-adr.md §3.2).
+irissync is a standalone binary that owns the IRIS source boundary in both
+directions: it liberates IRIS routine source to the filesystem (materialize
+routine source → mirror + manifest) and writes edited routines back (`push`).
+The read verbs (list/pull/status/verify) never write to IRIS; `push` is the
+opt-in write path and the SOLE DB WRITER, gated by a single-writer lock + a
+manifest conflict-check + detect-and-defer so it never clobbers a change made
+underneath it (the lock is the safety mechanism — see
+liberation-binary-design.md §5). It was scaffolded from go-cli-template. Go
+binaries built from it are Apache-2.0 (per-tier license split — see
+host-side-go-toolchain-adr.md §3.2).

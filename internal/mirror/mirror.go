@@ -45,6 +45,15 @@ func (l Layout) ManifestPath() string {
 	return filepath.Join(l.NamespaceDir(), ManifestName)
 }
 
+// PushLockName is the per-namespace single-writer push-lock filename.
+const PushLockName = ".irissync-push.lock"
+
+// PushLockPath is the namespace push-lock file path (used by `push`'s
+// single-writer lock).
+func (l Layout) PushLockPath() string {
+	return filepath.Join(l.NamespaceDir(), PushLockName)
+}
+
 // RoutinePath is the on-disk path for a routine docname (e.g. "DGREG.mac").
 func (l Layout) RoutinePath(docname string) string {
 	return filepath.Join(l.NamespaceDir(), docname)

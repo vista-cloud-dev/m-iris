@@ -1,24 +1,26 @@
 # irissync
 
-**A standalone, read-only tool that liberates IRIS routine source to the
-filesystem.** `irissync` materializes the M routines of an IRIS namespace into a
-git-friendly mirror tree + a verifiable manifest, and tells you when the mirror
-has drifted. It is **safe by construction: it never writes to IRIS** — every
-operation is a read (`GET`) over the Atelier REST API; the only thing it writes
-is the local mirror.
+**The standalone binary that owns the IRIS source boundary in both
+directions.** `irissync` materializes the M routines of an IRIS namespace into a
+git-friendly mirror tree + a verifiable manifest (the **read** side), and writes
+edited routines back to IRIS (the **`push`** side). The read verbs are **safe by
+construction** — every IRIS operation is a read (`GET`) over the Atelier REST
+API; the only thing they write is the local mirror. **`push` is the opt-in write
+path and the sole DB writer**, gated so it can never clobber a change made
+underneath it (see below).
 
 It is a **self-contained binary** — configured entirely by flags + `IRISSYNC_*`
 env (secrets optionally from files), with no dependency on the wider `m-cli`
 suite. File-based tooling then consumes the mirror as ordinary files.
 
-> **Scope:** this is the **read / liberation** half — `list`, `pull`, `status`,
-> `verify`. Write-back (`push`) is intentionally **not** part of this tool today;
-> it is a separate, future component (design:
-> [`liberation-binary-design.md`](https://github.com/vista-cloud-dev/vista-dev-bridge/blob/main/docs/liberation-binary-design.md);
-> tracked as stage 2.1 of the
-> [m-cli Go toolchain plan](https://github.com/vista-cloud-dev/vista-dev-bridge/blob/main/docs/m-cli-go-toolchain-implementation-plan.md)).
-> Keeping this binary read-only is the point: it's the "safe" tool you can run
-> against dev/test/pre-prod systems with zero risk to the source.
+> **Two halves, one binary.** The **read / liberation** verbs — `list`, `pull`,
+> `status`, `verify` — never touch IRIS source; run them against dev/test/pre-prod
+> with zero risk. **`push`** (stage 2.1) is the write-back half and the **sole DB
+> writer**: it PUTs edited routines and compiles-on-import, and is gated by a
+> **single-writer lock + a manifest conflict-check + detect-and-defer** so the
+> read-only safety story still holds — a write is refused (exit 4) rather than
+> overwriting a routine that changed since you pulled (design:
+> [`liberation-binary-design.md`](https://github.com/vista-cloud-dev/vista-dev-bridge/blob/main/docs/liberation-binary-design.md) §5).
 
 ```sh
 export IRISSYNC_BASE_URL=https://host:52773/api/atelier/v1/
@@ -29,6 +31,9 @@ irissync list                 # connectivity + inventory (no writes)
 irissync pull                 # DB → .int mirror + manifest (incremental)
 irissync status               # server vs. local manifest drift (exit 3 on drift)
 irissync verify               # re-hash the mirror against the manifest
+# edit routines in the mirror, then write them back (the sole DB writer):
+irissync push --dry-run       # plan: what would be pushed / conflicts / deferred
+irissync push                 # PUT + compile, single-writer-locked + conflict-checked
 ```
 
 ---
@@ -41,6 +46,7 @@ irissync verify               # re-hash the mirror against the manifest
 | `pull` | Materialize IRIS routine source → mirror, incremental via the manifest. | local mirror only |
 | `status` | Diff server vs. local manifest: `new` / `changed` / `deleted` / `unchanged`. | no |
 | `verify` | Re-hash mirror files against the manifest. Integrity gate for CI. | no |
+| `push` | **Write edited routines back to IRIS** (PUT + compile-on-import). The sole DB writer; single-writer-locked + conflict-checked (exit 4 on refusal). | **IRIS** (gated) |
 | `version` | Print version + Go toolchain (the pinned/mirrored audit trail). | no |
 | `schema` | Emit the command/flag tree as JSON (agent discovery). | no |
 | `install-completions` | Install shell tab-completions (bash/zsh/fish). | no |
@@ -72,9 +78,12 @@ never required ([design §4](https://github.com/vista-cloud-dev/vista-dev-bridge
 | `--dry-run` | — | — | plan only; never write |
 | `--porcelain` | — | — | terse, line-oriented output for `list`/`status` |
 | `--full` (pull) | — | — | ignore the manifest; re-pull everything |
+| `--force` (push) | — | — | push even if the server changed since pull / is held by another writer (override the conflict-check + detect-and-defer) |
+| `--lock-ttl` (push) | — | `15m` | reclaim a stale push lock older than this |
+| `--no-compile` (push) | — | — | skip the post-import compile (compile is on by default) |
 
 `list` needs `--base-url` + `--namespace`; `verify` needs `--instance` +
-`--namespace`; `pull`/`status` need all three.
+`--namespace`; `pull`/`status`/`push` need all three.
 
 ## Enterprise & multi-instance auth
 
@@ -161,7 +170,7 @@ UDL/Atelier text** — the XML `$SYSTEM.OBJ.Export` wrapper is refused; `.cls`
 
 `.irissync-manifest.json` makes the mirror an incremental cache (`pull` fetches
 only new/changed) and a verifiable artifact (`verify` re-hashes against it; it is
-also the conflict-check basis for the future `push`). One entry per routine:
+also the conflict-check basis for `push`). One entry per routine:
 
 ```json
 {
@@ -196,6 +205,58 @@ mirror file** (re-fetched on the next `pull`), but content **tampering** (file
 present, hash differs) is intentionally *not* re-hashed on every pull — `verify`
 detects it (exit 3) and `pull --full` repairs it.
 
+## Write-back (`push`) — the sole DB writer
+
+`push` is the **only** verb that writes to IRIS, and it is the **single,
+bidirectional owner** of the source boundary: nothing else (not `m-cli`, not the
+read verbs) writes routine source. It reads each edited routine from the mirror,
+PUTs it back (`PUT …/doc/{name}`), then **compiles-on-import**
+(`POST …/action/compile`) to validate the write and regenerate the read-only
+`.int`. Because a read-only tool is gaining a write verb, the write is gated by
+**three single-writer layers** ([design §5](https://github.com/vista-cloud-dev/vista-dev-bridge/blob/main/docs/liberation-binary-design.md)),
+narrowest → widest scope:
+
+1. **Local exclusive lock** — `<mirror>/<instance>/<ns>/.irissync-push.lock`,
+   created atomically (`O_CREATE|O_EXCL`), holding `{host, pid, startedAt}`.
+   Serializes concurrent `irissync push` against the same mirror/namespace; a
+   stale lock (dead PID on this host, or older than `--lock-ttl`) is reclaimed
+   with a warning. A live lock → **exit 4** (`LOCK_HELD`).
+2. **Manifest conflict-check (the cross-writer guard).** Before each PUT,
+   `push` re-reads the routine's live server timestamp and compares it to the
+   entry recorded at the last `pull`. If the server copy changed since you
+   pulled — i.e. **any** other writer touched it (changed, deleted, or a routine
+   that now exists but was never pulled) — that routine is **refused (exit 4)**,
+   not clobbered, unless `--force`. This is what makes "single writer" hold
+   against writers `irissync` does not control.
+3. **Detect-and-defer.** A routine the server marks **non-updatable** (the
+   Atelier `upd` flag — e.g. held by the InterSystems ObjectScript extension /
+   `%Studio.SourceControl`) is **deferred** (exit 4), not fought over, unless
+   `--force`.
+
+The push sequence is: scope the manifest's routines that have a local file →
+conflict-check + detect-and-defer (a full plan, also what `--dry-run` prints) →
+acquire the lock → for each writable routine `PUT …/doc/{name}` → `POST
+…/action/compile` → refresh the manifest entry to the new server timestamp/hash
+→ release the lock. A compile failure leaves the source saved but **flagged** —
+the write itself succeeded, so this is a *finding* (**exit 3**), not a refusal
+(exit 4); the manifest still records the new server state so the next
+`status`/`verify` is accurate.
+
+```sh
+# Round-trip: pull, edit in the mirror, push back (gate G3).
+irissync pull
+$EDITOR .m-cache/vehu-dev/VISTA/DGREG.mac
+irissync push --dry-run     # plan: to-push / up-to-date / conflicts / deferred
+irissync push               # PUT + compile, locked + conflict-checked
+irissync verify             # clean — the manifest matches the pushed file
+irissync status             # in sync — no drift
+```
+
+If someone changed `DGREG.mac` on the server after your `pull`, `push` refuses
+with **exit 4** (`PUSH_REFUSED`) and writes nothing — re-`pull` to reconcile, or
+`--force` to override. Push needs a pulled mirror (its conflict-check basis); it
+errors if there is no manifest.
+
 ## Output contract and exit codes
 
 Every command speaks the shared `clikit` contract: `--output`/`-o`
@@ -208,8 +269,8 @@ ladder.
 | `0` | success / in sync |
 | `1` | runtime error (auth / TLS / IO) |
 | `2` | usage error (missing/invalid flags) |
-| `3` | **drift** (`status`) or **mismatch** (`verify`) — CI gates on this **without parsing output** |
-| `4` | reserved for `push` refusals (conflict / lock / detect-and-defer — stage 2.1) |
+| `3` | **drift** (`status`), **mismatch** (`verify`), or **compile error** (`push` wrote the source but it did not compile cleanly) — CI gates on this **without parsing output** |
+| `4` | **`push` refused** — a conflict (server changed since pull), the lock is held, or a routine is deferred (held by another writer). Nothing was written; re-pull or pass `--force`. |
 
 For `status`/`verify`, the full report is on **stdout** (JSON envelope or text);
 on drift/mismatch the process **exits 3** and a concise reason goes to stderr.
@@ -235,9 +296,10 @@ main.go ──► Kong grammar (clikit.Globals + config.Conn)
               │
    internal/config   resolve flags > env; validate; build the client + layout
    internal/atelier  Atelier REST v1 client (net/http + crypto/tls + crypto/x509)
-                       docnames → []DocName · doc → source line array
-   internal/manifest  load/save .irissync-manifest.json · server⇄mirror diff
+                       docnames → []DocName · GET doc → source · PUT doc · action/compile
+   internal/manifest  load/save .irissync-manifest.json · server⇄mirror diff · push conflict-check
    internal/mirror    atomic routine writer (EOL normalize, UDL-only guard) · re-hash
+   internal/lock      exclusive push lock (O_CREATE|O_EXCL; PID/host/TTL stale reclaim)
 ```
 
 ## Dependency note (zero-`require` SBOM)

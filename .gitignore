@@ -5,6 +5,10 @@
 *.test
 coverage.*
 
+# Runtime artifacts — the default mirror root and the push lock
+/.m-cache/
+.irissync-push.lock
+
 # Editor / OS
 .DS_Store
 .idea/

@@ -1,14 +1,18 @@
-// Command irissync is a standalone, read-only tool that liberates IRIS routine
-// source to the filesystem: it materializes the M routines of a namespace into
-// a git-friendly mirror + manifest and verifies drift. It is safe by
-// construction — every IRIS operation is a read (GET) over the Atelier REST
-// API; the only writes are to the local mirror. Write-back (`push`) is a
-// separate, future component, deliberately not part of this binary.
+// Command irissync is the sole bidirectional owner of the IRIS source boundary:
+// it materializes the M routines of a namespace into a git-friendly mirror +
+// manifest (the read side), and writes edited routines back to IRIS (push).
+//
+// The read verbs (list/pull/status/verify) are safe by construction — every
+// IRIS operation is a GET; the only writes are to the local mirror. `push` is
+// the opt-in write path and the SOLE DB WRITER: it is gated by a single-writer
+// lock + a manifest conflict-check + detect-and-defer (liberation-binary-design
+// §5) so it never clobbers a change made underneath it.
 //
 //	irissync list      inventory server docnames (connectivity/auth smoke test)
 //	irissync pull      DB → .mac mirror + manifest, incremental
 //	irissync status    server vs. local manifest drift (exit 3 on drift)
 //	irissync verify    re-hash mirror files against the manifest (exit 3 on mismatch)
+//	irissync push      write edited routines back to IRIS (PUT + compile), conflict-checked, locked (exit 4 on refusal)
 //	irissync version   build + Go toolchain info
 //	irissync schema    machine-readable command tree (agent discovery)
 //
@@ -37,6 +41,7 @@ type CLI struct {
 	Pull   pullCmd   `cmd:"" help:"Materialize IRIS routine source → .mac mirror, incremental via the manifest."`
 	Status statusCmd `cmd:"" help:"Diff server vs. local manifest: new / changed / deleted (exit 3 on drift)."`
 	Verify verifyCmd `cmd:"" help:"Re-hash mirror files against the manifest (exit 3 on mismatch)."`
+	Push   pushCmd   `cmd:"" help:"Write edited routines back to IRIS (PUT + compile) — the sole DB writer; conflict-checked + single-writer-locked (exit 4 on refusal)."`
 
 	Schema  clikit.SchemaCmd  `cmd:"" help:"Emit the command/flag tree as JSON (agent discovery)."`
 	Version clikit.VersionCmd `cmd:"" help:"Show version and build info."`
@@ -48,7 +53,7 @@ func main() {
 	cli := &CLI{}
 	os.Exit(clikit.Run(
 		"irissync",
-		"IRIS source-sync — materialize IRIS routine source to a .mac mirror and verify it (read side).",
+		"IRIS source-sync — materialize IRIS routine source to a .mac mirror (read), and write edited routines back (push, the sole DB writer).",
 		cli, &cli.Globals,
 		kong.Bind(&cli.Conn),
 	))
