@@ -36,8 +36,11 @@ func capsDoc() Caps {
 		Transports: []string{"local", "docker", "remote"},
 		Axes: map[string][]string{
 			// M0 — meta + the existing irissync source verbs, regrouped under sync.
-			"meta": {"caps", "version", "info", "schema"},
+			"meta": {"caps", "version", "info", "schema", "doctor"},
 			"sync": {"list", "pull", "status", "verify", "push", "deploy"},
+			// M1 — lifecycle + health probes. provision/destroy are advertised but
+			// report unsupported (exit 7) on the remote transport (risk B4).
+			"lifecycle": {"up", "down", "restart", "status", "wait", "provision", "destroy"},
 		},
 		Features: map[string]bool{
 			"remote":          true,  // IRIS reaches over Atelier REST

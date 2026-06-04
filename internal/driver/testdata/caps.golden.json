@@ -7,11 +7,21 @@
     "remote"
   ],
   "axes": {
+    "lifecycle": [
+      "up",
+      "down",
+      "restart",
+      "status",
+      "wait",
+      "provision",
+      "destroy"
+    ],
     "meta": [
       "caps",
       "version",
       "info",
-      "schema"
+      "schema",
+      "doctor"
     ],
     "sync": [
       "list",

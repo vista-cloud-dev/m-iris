@@ -43,8 +43,9 @@ type CLI struct {
 	clikit.Globals
 	config.Conn
 
-	Meta metaCmd `cmd:"" help:"Introspection + power tools: caps / info / version / schema."`
-	Sync syncCmd `cmd:"" help:"Source axis: routine source ↔ instance (list / pull / status / verify / push / deploy)."`
+	Meta      metaCmd      `cmd:"" help:"Introspection + power tools: caps / info / version / schema."`
+	Lifecycle lifecycleCmd `cmd:"" help:"Manage the engine instance: up / down / restart / status / wait / provision / destroy."`
+	Sync      syncCmd      `cmd:"" help:"Source axis: routine source ↔ instance (list / pull / status / verify / push / deploy)."`
 
 	InstallCompletions kongplete.InstallCompletions `cmd:"" help:"Install shell tab-completions."`
 }

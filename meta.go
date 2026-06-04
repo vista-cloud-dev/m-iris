@@ -14,6 +14,7 @@ import (
 type metaCmd struct {
 	Caps    capsCmd           `cmd:"" help:"Emit the capability document (axes, transports, features) m-cli reads before calling optional verbs."`
 	Info    infoCmd           `cmd:"" help:"Driver identity + resolved engine target (edition/version filled by the M1 probe)."`
+	Doctor  doctorCmd         `cmd:"" help:"Typed preflight: reachable / auth / version / namespace / query-privilege / license (exit 0/5/6)."`
 	Version clikit.VersionCmd `cmd:"" help:"Show version and build info."`
 	Schema  clikit.SchemaCmd  `cmd:"" help:"Emit the command/flag tree as JSON (agent discovery)."`
 }

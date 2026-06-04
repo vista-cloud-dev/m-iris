@@ -21,6 +21,7 @@ import (
 // every subcommand, and bound (via kong.Bind) so command Run methods receive a
 // *Conn. Flags win over env; defaults fill the rest.
 type Conn struct {
+	Transport    string `env:"M_IRIS_TRANSPORT" enum:"local,docker,remote" default:"remote" help:"Engine transport: local | docker | remote (Atelier REST). Only remote is wired today."`
 	BaseURL      string `name:"base-url" env:"M_IRIS_BASE_URL" help:"Atelier base URL, e.g. https://host:52773/api/atelier/v1/" placeholder:"URL"`
 	Instance     string `env:"M_IRIS_INSTANCE" help:"Instance label used in the mirror path." placeholder:"NAME"`
 	Namespace    string `env:"M_IRIS_NAMESPACE" help:"IRIS namespace to liberate." placeholder:"NS"`

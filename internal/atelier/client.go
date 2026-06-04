@@ -165,27 +165,29 @@ func (c *Client) do(ctx context.Context, method string, u *url.URL, body []byte,
 	if err != nil {
 		return fmt.Errorf("atelier: read response from %s: %w", u.Path, err)
 	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		return fmt.Errorf("atelier: authentication failed (HTTP 401) for %s", u.Path)
+	// Auth failures carry no useful envelope; surface them as typed HTTPErrors so
+	// doctor/lifecycle can tell 401 (bad credential) from 403 (no privilege).
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return &HTTPError{Status: resp.StatusCode, Method: method, Path: u.Path}
 	}
 
 	// Atelier returns its envelope (with status.errors) even on 4xx/5xx, so try
-	// to decode before falling back to a bare HTTP-status error.
+	// to decode before falling back to a typed HTTP-status error.
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
 			if resp.StatusCode >= 400 {
-				return fmt.Errorf("atelier: %s %s: HTTP %d", method, u.Path, resp.StatusCode)
+				return &HTTPError{Status: resp.StatusCode, Method: method, Path: u.Path}
 			}
 			return fmt.Errorf("atelier: decode response from %s: %w", u.Path, err)
 		}
 	} else if resp.StatusCode >= 400 {
-		return fmt.Errorf("atelier: %s %s: HTTP %d", method, u.Path, resp.StatusCode)
+		return &HTTPError{Status: resp.StatusCode, Method: method, Path: u.Path}
 	}
 	if err := out.Status.firstError(); err != nil {
 		return fmt.Errorf("atelier: %s: %w", u.Path, err)
 	}
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("atelier: %s %s: HTTP %d", method, u.Path, resp.StatusCode)
+		return &HTTPError{Status: resp.StatusCode, Method: method, Path: u.Path}
 	}
 	return nil
 }

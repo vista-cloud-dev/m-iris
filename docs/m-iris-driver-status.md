@@ -18,6 +18,22 @@ Legend: ☑ done · ◐ in progress · ☐ not started
   + `sync` (the regrouped source verbs). `caps` golden-tested and **honest**
   (advertises only what is wired; grows per milestone).
 
+## M1 — lifecycle + health probes + doctor ◐ (remote done; local/docker pending)
+
+- ☑ `atelier.ServerInfo` — `GET /api/atelier/v1/` → version / api / namespaces;
+  typed `*HTTPError` with `IsUnauthorized`/`IsForbidden` (401 vs 403 distinct).
+- ☑ `--transport local|docker|remote` flag (default `remote`; only remote wired).
+- ☑ `lifecycle` axis (remote/attach): `status` (+`--probe` CI gate, exit 0/6),
+  `wait --timeout` (poll → exit 6 on timeout), `up` (verify+attach), `down`
+  (detach no-op), `restart`; `provision`/`destroy` report **unsupported (exit 7)**
+  over Atelier (risk B4). local/docker → not-implemented until M3 transports.
+- ☑ `meta doctor` — typed matrix {name,ok,detail,fix}, exit 0/5/6: reachable,
+  auth (401/403), version (≥ 2022.1), namespace presence, **query-privilege**
+  (action/query SELECT 1 — the C7 runner-privilege proxy), license (honestly
+  not-probed on remote until M6).
+- ☐ local/docker lifecycle (container / `iris start`/`iris stop`) — needs the
+  session-transport command seam (lands with M3 local+docker exec).
+
 ## Remote spike (plan §5 task 8) — substrate built, real-engine green gated ◐
 
 The remote substrate is the whole-cloth de-risking item (risk B2): Atelier has no
