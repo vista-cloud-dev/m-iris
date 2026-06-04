@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	mdriver "github.com/vista-cloud-dev/m-driver-sdk"
 	"github.com/vista-cloud-dev/m-iris/internal/atelier"
-	"github.com/vista-cloud-dev/m-iris/internal/driver"
 )
 
 // fakeAPI scripts the runner's SQL surface in-memory: it records PUT/Compile
@@ -66,7 +66,7 @@ func TestRemoteExec_DeploysRunnerOnceAndRunsClean(t *testing.T) {
 	tr := New(api)
 	ctx := context.Background()
 
-	res, err := tr.Exec(ctx, driver.ExecRequest{EntryRef: "RUN^STDHARN", Prefix: "zzt42"})
+	res, err := tr.Exec(ctx, mdriver.ExecRequest{EntryRef: "RUN^STDHARN", Prefix: "zzt42"})
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestRemoteExec_DeploysRunnerOnceAndRunsClean(t *testing.T) {
 		t.Errorf("compiles = %v, want one", api.compiles)
 	}
 	// ...and not re-deployed on a second call.
-	if _, err := tr.Exec(ctx, driver.ExecRequest{EntryRef: "OTHER^RTN", Prefix: "zzt42"}); err != nil {
+	if _, err := tr.Exec(ctx, mdriver.ExecRequest{EntryRef: "OTHER^RTN", Prefix: "zzt42"}); err != nil {
 		t.Fatalf("second Exec: %v", err)
 	}
 	if len(api.puts) != 1 {
@@ -97,7 +97,7 @@ func TestRemoteExec_FaultBecomesEngineError(t *testing.T) {
 	api.runFault = &clikit3Engine{mnemonic: "<UNDEFINED>", routine: "XLFISO", line: "12", text: "global undefined"}
 	tr := New(api)
 
-	res, err := tr.Exec(context.Background(), driver.ExecRequest{EntryRef: "BROKEN^XLFISO", Prefix: "zzt7"})
+	res, err := tr.Exec(context.Background(), mdriver.ExecRequest{EntryRef: "BROKEN^XLFISO", Prefix: "zzt7"})
 	if err != nil {
 		t.Fatalf("a fault must be data, not a Go error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestRemoteData_SetGetRoundTrip(t *testing.T) {
 	if err := tr.SetGlobal(ctx, ref, "hello"); err != nil {
 		t.Fatalf("SetGlobal: %v", err)
 	}
-	node, err := tr.ReadGlobal(ctx, driver.GlobalRef{Ref: ref})
+	node, err := tr.ReadGlobal(ctx, mdriver.GlobalRef{Ref: ref})
 	if err != nil {
 		t.Fatalf("ReadGlobal: %v", err)
 	}

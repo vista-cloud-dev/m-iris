@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	mdriver "github.com/vista-cloud-dev/m-driver-sdk"
 	"github.com/vista-cloud-dev/m-iris/clikit"
 	"github.com/vista-cloud-dev/m-iris/internal/config"
 	"github.com/vista-cloud-dev/m-iris/internal/driver"
@@ -33,11 +34,9 @@ func (capsCmd) Run(cc *clikit.Context) error {
 			[2]string{"engine", caps.Engine},
 			[2]string{"transports", fmt.Sprint(caps.Transports)},
 		)
-		for _, axis := range []string{"lifecycle", "sync", "exec", "data", "cover", "admin", "meta"} {
-			if verbs, ok := caps.Axes[axis]; ok {
-				cc.Rule(axis)
-				fmt.Fprintln(cc.Stdout, "  "+fmt.Sprint(verbs))
-			}
+		for _, axis := range caps.Axes.Wired() {
+			cc.Rule(axis.Name)
+			fmt.Fprintln(cc.Stdout, "  "+fmt.Sprint(axis.Verbs))
 		}
 	})
 }
@@ -63,7 +62,7 @@ func (infoCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	res := infoResult{
 		Driver:    "m-iris",
 		Engine:    "iris",
-		Contract:  driver.ContractVersion,
+		Contract:  mdriver.ContractVersion,
 		Build:     clikit.Version,
 		BaseURL:   conn.BaseURL,
 		Namespace: conn.Namespace,

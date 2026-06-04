@@ -16,13 +16,6 @@
       "provision",
       "destroy"
     ],
-    "meta": [
-      "caps",
-      "version",
-      "info",
-      "schema",
-      "doctor"
-    ],
     "sync": [
       "list",
       "pull",
@@ -30,12 +23,19 @@
       "verify",
       "push",
       "deploy"
+    ],
+    "meta": [
+      "caps",
+      "version",
+      "info",
+      "schema",
+      "doctor"
     ]
   },
   "features": {
-    "ephemeralPrefix": true,
-    "prune": true,
     "remote": true,
+    "prune": true,
+    "ephemeralPrefix": true,
     "snapshot": false
   }
 }

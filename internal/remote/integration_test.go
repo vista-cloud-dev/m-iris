@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	mdriver "github.com/vista-cloud-dev/m-driver-sdk"
 	"github.com/vista-cloud-dev/m-iris/internal/atelier"
-	"github.com/vista-cloud-dev/m-iris/internal/driver"
 )
 
 // TestRemoteSpike_RealEngine is the REMOTE SPIKE (driver-plan §5 task 8): it
@@ -55,7 +55,7 @@ func TestRemoteSpike_RealEngine(t *testing.T) {
 	if err := tr.SetGlobal(ctx, `^mIrisIT("ping")`, "pong"); err != nil {
 		t.Fatalf("SetGlobal: %v", err)
 	}
-	node, err := tr.ReadGlobal(ctx, driver.GlobalRef{Ref: `^mIrisIT("ping")`})
+	node, err := tr.ReadGlobal(ctx, mdriver.GlobalRef{Ref: `^mIrisIT("ping")`})
 	if err != nil {
 		t.Fatalf("ReadGlobal: %v", err)
 	}
@@ -64,12 +64,12 @@ func TestRemoteSpike_RealEngine(t *testing.T) {
 	}
 
 	// 2. Eval a command; its side effect is visible through a result-global read.
-	if _, err := tr.Exec(ctx, driver.ExecRequest{
+	if _, err := tr.Exec(ctx, mdriver.ExecRequest{
 		Command: `set ^mIrisRun("zzit","out")="evaled"`, Prefix: "zzit",
 	}); err != nil {
 		t.Fatalf("Exec eval: %v", err)
 	}
-	out, err := tr.ReadGlobal(ctx, driver.GlobalRef{Ref: `^mIrisRun("zzit","out")`})
+	out, err := tr.ReadGlobal(ctx, mdriver.GlobalRef{Ref: `^mIrisRun("zzit","out")`})
 	if err != nil {
 		t.Fatalf("ReadGlobal out: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestRemoteSpike_RealEngine(t *testing.T) {
 	}
 
 	// 3. A deliberate fault surfaces as a structured EngineError, not a Go error.
-	res, err := tr.Exec(ctx, driver.ExecRequest{
+	res, err := tr.Exec(ctx, mdriver.ExecRequest{
 		Command: `set x=^mIrisNoSuchGlobal(1)`, Prefix: "zzfault",
 	})
 	if err != nil {

@@ -16,9 +16,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vista-cloud-dev/m-iris/clikit"
+	mdriver "github.com/vista-cloud-dev/m-driver-sdk"
 	"github.com/vista-cloud-dev/m-iris/internal/atelier"
-	"github.com/vista-cloud-dev/m-iris/internal/driver"
 )
 
 //go:embed runner/m_iris.Runner.cls
@@ -38,13 +37,13 @@ type AtelierAPI interface {
 }
 
 // Transport is the remote (Atelier REST + SQL runner) strategy. It satisfies
-// driver.Transport so the rest of m-iris is transport-agnostic.
+// mdriver.Transport so the rest of m-iris is transport-agnostic.
 type Transport struct {
 	api      AtelierAPI
 	deployed bool // runner PUT+compiled this process
 }
 
-var _ driver.Transport = (*Transport)(nil)
+var _ mdriver.Transport = (*Transport)(nil)
 
 // New builds a remote transport over an Atelier client.
 func New(api AtelierAPI) *Transport { return &Transport{api: api} }
@@ -83,9 +82,9 @@ func runID(prefix string) string {
 // Exec runs an entryref or evaluates a command through the runner. A compile/
 // runtime fault is data, not a Go error: the runner records it in the result
 // global and Exec returns it as ExecResult.EngineError (contract §7).
-func (t *Transport) Exec(ctx context.Context, req driver.ExecRequest) (driver.ExecResult, error) {
+func (t *Transport) Exec(ctx context.Context, req mdriver.ExecRequest) (mdriver.ExecResult, error) {
 	if err := t.ensureRunner(ctx); err != nil {
-		return driver.ExecResult{}, err
+		return mdriver.ExecResult{}, err
 	}
 	rid := runID(req.Prefix)
 
@@ -98,41 +97,41 @@ func (t *Transport) Exec(ctx context.Context, req driver.ExecRequest) (driver.Ex
 		rows, err = t.api.Query(ctx, "SELECT m_iris.RunRef(?,?,?) AS status",
 			rid, req.EntryRef, strings.Join(req.Args, "\x01"))
 	default:
-		return driver.ExecResult{}, fmt.Errorf("remote: exec needs an entryref or a command")
+		return mdriver.ExecResult{}, fmt.Errorf("remote: exec needs an entryref or a command")
 	}
 	if err != nil {
-		return driver.ExecResult{}, err
+		return mdriver.ExecResult{}, err
 	}
 
 	status := firstCol(rows, "status")
 	switch status {
 	case "7":
-		return driver.ExecResult{}, fmt.Errorf("remote: runner refused — caller lacks the m_iris_runner role / action-query privilege")
+		return mdriver.ExecResult{}, fmt.Errorf("remote: runner refused — caller lacks the m_iris_runner role / action-query privilege")
 	case "5":
 		eng, rerr := t.readEngineError(ctx, rid)
 		if rerr != nil {
-			return driver.ExecResult{}, rerr
+			return mdriver.ExecResult{}, rerr
 		}
-		return driver.ExecResult{Status: 5, EngineError: eng}, nil
+		return mdriver.ExecResult{Status: 5, EngineError: eng}, nil
 	}
 
 	out, err := t.getGlobal(ctx, fmt.Sprintf(`^mIrisRun(%q,"out")`, rid))
 	if err != nil {
-		return driver.ExecResult{}, err
+		return mdriver.ExecResult{}, err
 	}
 	st, _ := strconv.Atoi(status)
-	return driver.ExecResult{Stdout: out, Status: st}, nil
+	return mdriver.ExecResult{Stdout: out, Status: st}, nil
 }
 
 // readEngineError reads ^mIrisRun(rid,"error") and parses the §7 frame
 // "mnemonic|routine|line|text".
-func (t *Transport) readEngineError(ctx context.Context, rid string) (*clikit.EngineError, error) {
+func (t *Transport) readEngineError(ctx context.Context, rid string) (*mdriver.EngineError, error) {
 	raw, err := t.getGlobal(ctx, fmt.Sprintf(`^mIrisRun(%q,"error")`, rid))
 	if err != nil {
 		return nil, err
 	}
 	parts := strings.SplitN(raw, "|", 4)
-	eng := &clikit.EngineError{}
+	eng := &mdriver.EngineError{}
 	if len(parts) > 0 {
 		eng.Mnemonic = parts[0]
 	}
@@ -149,15 +148,15 @@ func (t *Transport) readEngineError(ctx context.Context, rid string) (*clikit.En
 }
 
 // ReadGlobal reads a single global node via the runner (contract data.get).
-func (t *Transport) ReadGlobal(ctx context.Context, req driver.GlobalRef) (driver.GlobalNode, error) {
+func (t *Transport) ReadGlobal(ctx context.Context, req mdriver.GlobalRef) (mdriver.GlobalNode, error) {
 	if err := t.ensureRunner(ctx); err != nil {
-		return driver.GlobalNode{}, err
+		return mdriver.GlobalNode{}, err
 	}
 	v, err := t.getGlobal(ctx, req.Ref)
 	if err != nil {
-		return driver.GlobalNode{}, err
+		return mdriver.GlobalNode{}, err
 	}
-	return driver.GlobalNode{Ref: req.Ref, Value: v}, nil
+	return mdriver.GlobalNode{Ref: req.Ref, Value: v}, nil
 }
 
 // SetGlobal sets a single global node via the runner (contract data.set).
@@ -182,41 +181,41 @@ func (t *Transport) getGlobal(ctx context.Context, ref string) (string, error) {
 // Load PUT+compiles routine source over Atelier (contract exec.load on remote).
 // Compile diagnostics are surfaced as an EngineError rather than a Go error —
 // a failed compile is a bad result, not a transport failure.
-func (t *Transport) Load(ctx context.Context, req driver.LoadRequest) (driver.LoadResult, error) {
+func (t *Transport) Load(ctx context.Context, req mdriver.LoadRequest) (mdriver.LoadResult, error) {
 	files, err := expandPaths(req.Paths)
 	if err != nil {
-		return driver.LoadResult{}, err
+		return mdriver.LoadResult{}, err
 	}
 	var loaded []string
 	for _, f := range files {
 		content, rerr := os.ReadFile(f)
 		if rerr != nil {
-			return driver.LoadResult{}, rerr
+			return mdriver.LoadResult{}, rerr
 		}
 		name := req.Prefix + filepath.Base(f)
 		if _, perr := t.api.PutDoc(ctx, name, splitLines(string(content))); perr != nil {
-			return driver.LoadResult{}, perr
+			return mdriver.LoadResult{}, perr
 		}
 		loaded = append(loaded, name)
 	}
 	if len(loaded) > 0 {
 		if _, cerr := t.api.Compile(ctx, loaded, "cuk"); cerr != nil {
-			return driver.LoadResult{}, cerr
+			return mdriver.LoadResult{}, cerr
 		}
 	}
-	return driver.LoadResult{Loaded: loaded}, nil
+	return mdriver.LoadResult{Loaded: loaded}, nil
 }
 
 // Health proves the remote substrate is reachable AND that the caller actually
 // holds the action/query privilege (a SELECT 1, not just TCP reachability —
 // risks C3, C7). Version enrichment lands with the M1 root-endpoint probe.
-func (t *Transport) Health(ctx context.Context) (driver.Health, error) {
+func (t *Transport) Health(ctx context.Context) (mdriver.Health, error) {
 	rows, err := t.api.Query(ctx, "SELECT 1 AS one")
 	if err != nil {
-		return driver.Health{Running: false, Healthy: false}, err
+		return mdriver.Health{Running: false, Healthy: false}, err
 	}
 	healthy := firstCol(rows, "one") == "1"
-	return driver.Health{Running: true, Healthy: healthy}, nil
+	return mdriver.Health{Running: true, Healthy: healthy}, nil
 }
 
 func firstCol(rows []map[string]string, col string) string {

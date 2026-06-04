@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	mdriver "github.com/vista-cloud-dev/m-driver-sdk"
 )
 
 // TestCaps_Golden pins the m-iris capability document (driver-contract.md §4).
@@ -19,6 +21,11 @@ func TestCaps_Golden(t *testing.T) {
 	got = append(got, '\n')
 
 	golden := filepath.Join("testdata", "caps.golden.json")
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		if err := os.WriteFile(golden, got, 0o644); err != nil {
+			t.Fatalf("update golden: %v", err)
+		}
+	}
 	want, err := os.ReadFile(golden)
 	if err != nil {
 		t.Fatalf("read golden: %v", err)
@@ -35,11 +42,11 @@ func TestCaps_Invariants(t *testing.T) {
 	if c.Engine != "iris" {
 		t.Errorf("engine = %q, want iris", c.Engine)
 	}
-	if c.Contract != ContractVersion {
-		t.Errorf("contract = %q, want %q", c.Contract, ContractVersion)
+	if c.Contract != mdriver.ContractVersion {
+		t.Errorf("contract = %q, want %q", c.Contract, mdriver.ContractVersion)
 	}
 	// IRIS is the only engine with a remote transport (Atelier REST).
-	if !c.Features["remote"] {
+	if !c.Features.Remote {
 		t.Error("features.remote must be true for IRIS")
 	}
 	wantTransports := map[string]bool{"local": true, "docker": true, "remote": true}
