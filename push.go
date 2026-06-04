@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vista-cloud-dev/irissync/clikit"
-	"github.com/vista-cloud-dev/irissync/internal/atelier"
-	"github.com/vista-cloud-dev/irissync/internal/config"
-	"github.com/vista-cloud-dev/irissync/internal/lock"
-	"github.com/vista-cloud-dev/irissync/internal/manifest"
-	"github.com/vista-cloud-dev/irissync/internal/mirror"
+	"github.com/vista-cloud-dev/m-iris/clikit"
+	"github.com/vista-cloud-dev/m-iris/internal/atelier"
+	"github.com/vista-cloud-dev/m-iris/internal/config"
+	"github.com/vista-cloud-dev/m-iris/internal/lock"
+	"github.com/vista-cloud-dev/m-iris/internal/manifest"
+	"github.com/vista-cloud-dev/m-iris/internal/mirror"
 )
 
 // pushCmd writes edited routines from the mirror back to IRIS — the sole DB
@@ -73,7 +73,7 @@ func (c *pushCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	}
 	if man == nil {
 		return clikit.Fail(clikit.ExitRuntime, "NO_MANIFEST",
-			"no manifest at "+layout.ManifestPath()+"; run 'irissync pull' first", "push requires a pulled mirror as its conflict-check basis")
+			"no manifest at "+layout.ManifestPath()+"; run 'm-iris sync pull' first", "push requires a pulled mirror as its conflict-check basis")
 	}
 
 	// Candidate routines: the manifest's docnames, filtered, that have a mirror

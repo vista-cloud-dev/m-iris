@@ -13,27 +13,27 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vista-cloud-dev/irissync/internal/atelier"
-	"github.com/vista-cloud-dev/irissync/internal/mirror"
+	"github.com/vista-cloud-dev/m-iris/internal/atelier"
+	"github.com/vista-cloud-dev/m-iris/internal/mirror"
 )
 
 // Conn is embedded in the root CLI struct, so its fields are global flags on
 // every subcommand, and bound (via kong.Bind) so command Run methods receive a
 // *Conn. Flags win over env; defaults fill the rest.
 type Conn struct {
-	BaseURL      string `name:"base-url" env:"IRISSYNC_BASE_URL" help:"Atelier base URL, e.g. https://host:52773/api/atelier/v1/" placeholder:"URL"`
-	Instance     string `env:"IRISSYNC_INSTANCE" help:"Instance label used in the mirror path." placeholder:"NAME"`
-	Namespace    string `env:"IRISSYNC_NAMESPACE" help:"IRIS namespace to liberate." placeholder:"NS"`
-	Mirror       string `env:"IRISSYNC_MIRROR" default:".m-cache" help:"Mirror root directory."`
-	Type         string `env:"IRISSYNC_TYPE" enum:"mac,int,inc" default:"mac" help:"Routine type to liberate: mac (UDL/ObjectScript), int (classic MUMPS — e.g. ^%RI-loaded VistA), or inc (includes)."`
-	Token        string `env:"IRISSYNC_TOKEN" help:"OAuth2/bearer token for Atelier (sent as 'Authorization: Bearer …'; wins over --user/--password)." placeholder:"TOKEN"`
-	TokenFile    string `name:"token-file" env:"IRISSYNC_TOKEN_FILE" help:"Read the bearer token from this file (preferred over --token; keeps the secret out of argv/env)." placeholder:"PATH"`
-	User         string `env:"IRISSYNC_USER" help:"Atelier username (basic auth)."`
-	Password     string `env:"IRISSYNC_PASSWORD" help:"Atelier password (basic auth)."`
-	PasswordFile string `name:"password-file" env:"IRISSYNC_PASSWORD_FILE" help:"Read the basic-auth password from this file (preferred over --password)." placeholder:"PATH"`
-	CAFile       string `name:"ca-file" env:"IRISSYNC_CA_FILE" help:"Internal CA bundle (PEM) for in-boundary TLS." placeholder:"PATH"`
-	ClientCert   string `name:"client-cert" env:"IRISSYNC_CLIENT_CERT" help:"Client certificate (PEM) for mutual TLS." placeholder:"PATH"`
-	ClientKey    string `name:"client-key" env:"IRISSYNC_CLIENT_KEY" help:"Client private key (PEM) for mutual TLS." placeholder:"PATH"`
+	BaseURL      string `name:"base-url" env:"M_IRIS_BASE_URL" help:"Atelier base URL, e.g. https://host:52773/api/atelier/v1/" placeholder:"URL"`
+	Instance     string `env:"M_IRIS_INSTANCE" help:"Instance label used in the mirror path." placeholder:"NAME"`
+	Namespace    string `env:"M_IRIS_NAMESPACE" help:"IRIS namespace to liberate." placeholder:"NS"`
+	Mirror       string `env:"M_IRIS_MIRROR" default:".m-cache" help:"Mirror root directory."`
+	Type         string `env:"M_IRIS_TYPE" enum:"mac,int,inc" default:"mac" help:"Routine type to liberate: mac (UDL/ObjectScript), int (classic MUMPS — e.g. ^%RI-loaded VistA), or inc (includes)."`
+	Token        string `env:"M_IRIS_TOKEN" help:"OAuth2/bearer token for Atelier (sent as 'Authorization: Bearer …'; wins over --user/--password)." placeholder:"TOKEN"`
+	TokenFile    string `name:"token-file" env:"M_IRIS_TOKEN_FILE" help:"Read the bearer token from this file (preferred over --token; keeps the secret out of argv/env)." placeholder:"PATH"`
+	User         string `env:"M_IRIS_USER" help:"Atelier username (basic auth)."`
+	Password     string `env:"M_IRIS_PASSWORD" help:"Atelier password (basic auth)."`
+	PasswordFile string `name:"password-file" env:"M_IRIS_PASSWORD_FILE" help:"Read the basic-auth password from this file (preferred over --password)." placeholder:"PATH"`
+	CAFile       string `name:"ca-file" env:"M_IRIS_CA_FILE" help:"Internal CA bundle (PEM) for in-boundary TLS." placeholder:"PATH"`
+	ClientCert   string `name:"client-cert" env:"M_IRIS_CLIENT_CERT" help:"Client certificate (PEM) for mutual TLS." placeholder:"PATH"`
+	ClientKey    string `name:"client-key" env:"M_IRIS_CLIENT_KEY" help:"Client private key (PEM) for mutual TLS." placeholder:"PATH"`
 	Concurrency  int    `default:"8" help:"Parallel document GETs."`
 	Filter       string `help:"Glob filter over docnames (e.g. 'DG*')." placeholder:"GLOB"`
 	Package      string `help:"Restrict to a package / routine-name prefix." placeholder:"PREFIX"`

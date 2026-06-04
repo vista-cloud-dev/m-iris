@@ -1,4 +1,4 @@
-module github.com/vista-cloud-dev/irissync
+module github.com/vista-cloud-dev/m-iris
 
 go 1.26.3
 

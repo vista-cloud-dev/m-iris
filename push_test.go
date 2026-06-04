@@ -13,8 +13,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vista-cloud-dev/irissync/clikit"
-	"github.com/vista-cloud-dev/irissync/internal/config"
+	"github.com/vista-cloud-dev/m-iris/clikit"
+	"github.com/vista-cloud-dev/m-iris/internal/config"
 )
 
 // rwAtelier is a read+write fake Atelier server: it serves docnames, GET doc,

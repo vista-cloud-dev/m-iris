@@ -3,8 +3,8 @@
 # -trimpath, version stamped via -ldflags, cross-compile matrix, lint, test,
 # schema.
 
-BIN     ?= irissync
-PKG     := github.com/vista-cloud-dev/irissync
+BIN     ?= m-iris
+PKG     := github.com/vista-cloud-dev/m-iris
 LDPKG   := $(PKG)/clikit
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)

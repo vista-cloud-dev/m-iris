@@ -4,7 +4,7 @@ import "runtime"
 
 // Build metadata, injected at link time:
 //
-//	go build -ldflags "-X github.com/vista-cloud-dev/irissync/clikit.Version=$VER \
+//	go build -ldflags "-X github.com/vista-cloud-dev/m-iris/clikit.Version=$VER \
 //	                    -X …/clikit.Commit=$SHA -X …/clikit.Date=$DATE"
 var (
 	Version = "dev"

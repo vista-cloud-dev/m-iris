@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 )
 
@@ -80,6 +81,21 @@ func (c *Client) PutDoc(ctx context.Context, name string, content []string) (*Pu
 		}
 	}
 	return res, nil
+}
+
+// DeleteDoc removes a document from the server (DELETE …/doc/{name}). It is used
+// by `irissync deploy --prune` to drop routines no longer in the source set. A
+// document that is already absent is treated as success (the desired end state).
+func (c *Client) DeleteDoc(ctx context.Context, name string) error {
+	u := c.endpoint(c.namespace, "doc", name)
+	var env Envelope
+	if err := c.do(ctx, http.MethodDelete, u, nil, &env); err != nil {
+		if isNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // Stat fetches a document's current metadata (timestamp) without committing to
