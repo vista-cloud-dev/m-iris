@@ -33,6 +33,18 @@ lint:
 test:
 	CGO_ENABLED=1 go test $(GOFLAGS) -race -cover ./...
 
+# Real-engine integration tier (gated). Needs a disposable IRIS container with
+# Atelier reachable. Defaults target the local m-test-iris (CE on port 52774);
+# override IRIS_* to point elsewhere. NEVER point at the shared vista-iris.
+IRIS_BASE_URL ?= http://localhost:52774/api/atelier/v1/
+IRIS_NAMESPACE ?= USER
+IRIS_USER ?= _SYSTEM
+IRIS_PASSWORD ?= testsys
+test-it:
+	M_IRIS_IT=1 M_IRIS_BASE_URL=$(IRIS_BASE_URL) M_IRIS_NAMESPACE=$(IRIS_NAMESPACE) \
+		M_IRIS_USER=$(IRIS_USER) M_IRIS_PASSWORD=$(IRIS_PASSWORD) \
+		go test $(GOFLAGS) -count=1 -run RealEngine ./internal/remote/ -v
+
 tidy:
 	go mod tidy
 

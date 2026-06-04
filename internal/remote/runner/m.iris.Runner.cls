@@ -1,4 +1,7 @@
-/// m_iris.Runner is the remote execution substrate for the m-iris driver.
+/// m.iris.Runner is the remote execution substrate for the m-iris driver.
+/// (Package "m.iris" — NOT "m_iris": IRIS class names forbid underscores; the
+/// package's dots map to the SQL schema "m_iris", so the SqlProc names below
+/// stay m_iris.*.)
 ///
 /// Atelier exposes no raw "run ObjectScript" endpoint, and Go has no official
 /// IRIS Native SDK — so on the `remote` transport ALL ObjectScript (exec, data,
@@ -8,10 +11,14 @@
 /// (driver-plan §5 task 8, risk B2). It is a security boundary, so every entry
 /// point is role-gated AND parameterized (callers bind values, never concatenate).
 ///
+/// NB: executable lines avoid spaces after commas — ObjectScript treats a space
+/// inside a command argument as a terminator (a space after a comma in a QUIT
+/// expression triggers #1043 "QUIT argument not allowed").
+///
 /// Result global, keyed by a caller-supplied run id (rid):
 ///   ^mIrisRun(rid,"status") = 0 ok | 5 fault | 7 unauthorized
 ///   ^mIrisRun(rid,"error")  = "mnemonic|routine|line|text"   (on fault, contract §7)
-Class m_iris.Runner Extends %RegisteredObject
+Class m.iris.Runner Extends %RegisteredObject
 {
 
 /// authorized reports whether the caller may drive the substrate. Holding the
@@ -20,18 +27,18 @@ Class m_iris.Runner Extends %RegisteredObject
 /// granted only to m_iris_runner (defense in depth: app-role AND SQL privilege).
 ClassMethod authorized() As %Boolean [ Private ]
 {
-	quit ($SYSTEM.Security.Check("m_iris_runner", "USE") '= "") || ($USERNAME = "_SYSTEM")
+	quit ($SYSTEM.Security.Check("m_iris_runner","USE")'="")||($USERNAME="_SYSTEM")
 }
 
 /// fault records a caught exception into the result global in contract-§7 shape
 /// (mnemonic|routine|line|text) and returns status 5.
 ClassMethod fault(rid As %String, ex As %Exception.AbstractException) As %Integer [ Private ]
 {
-	set loc = ex.Location
-	set routine = $piece(loc, "^", 2)
-	set line = $piece($piece(loc, "^", 1), "+", 2)
-	set ^mIrisRun(rid, "status") = 5
-	set ^mIrisRun(rid, "error") = ex.Name _ "|" _ routine _ "|" _ line _ "|" _ ex.DisplayString()
+	set loc=ex.Location
+	set routine=$piece(loc,"^",2)
+	set line=$piece($piece(loc,"^",1),"+",2)
+	set ^mIrisRun(rid,"status")=5
+	set ^mIrisRun(rid,"error")=ex.Name_"|"_routine_"|"_line_"|"_ex.DisplayString()
 	quit 5
 }
 
@@ -42,13 +49,13 @@ ClassMethod RunRef(rid As %String, ref As %String, args As %String = "") As %Int
 {
 	if '..authorized() quit 7
 	kill ^mIrisRun(rid)
-	set ^mIrisRun(rid, "status") = 0
+	set ^mIrisRun(rid,"status")=0
 	try {
 		do @ref
 	} catch ex {
-		quit ..fault(rid, ex)
+		do ..fault(rid,ex)
 	}
-	quit ^mIrisRun(rid, "status")
+	quit ^mIrisRun(rid,"status")
 }
 
 /// Eval executes one ObjectScript command line via XECUTE (contract exec.eval).
@@ -57,13 +64,13 @@ ClassMethod Eval(rid As %String, cmd As %String) As %Integer [ SqlName = "Eval",
 {
 	if '..authorized() quit 7
 	kill ^mIrisRun(rid)
-	set ^mIrisRun(rid, "status") = 0
+	set ^mIrisRun(rid,"status")=0
 	try {
 		xecute cmd
 	} catch ex {
-		quit ..fault(rid, ex)
+		do ..fault(rid,ex)
 	}
-	quit ^mIrisRun(rid, "status")
+	quit ^mIrisRun(rid,"status")
 }
 
 /// GetGlobal returns $get(@ref); ref is a full global reference, e.g.
@@ -80,7 +87,7 @@ ClassMethod GetGlobal(ref As %String) As %String [ SqlName = "GetGlobal", SqlPro
 ClassMethod SetGlobal(ref As %String, value As %String = "") As %Integer [ SqlName = "SetGlobal", SqlProc ]
 {
 	if '..authorized() quit 7
-	set @ref = value
+	set @ref=value
 	quit 1
 }
 

@@ -1,7 +1,7 @@
 // Package remote is the IRIS `remote` transport: vendor logic that drives an
 // IRIS namespace entirely over the Atelier REST API. Because Atelier has no raw
 // "run ObjectScript" endpoint, every ObjectScript operation rides the
-// m_iris.Runner class (runner/m_iris.Runner.cls): the transport PUT+compiles it
+// m.iris.Runner class (runner/m.iris.Runner.cls): the transport PUT+compiles it
 // once, then invokes its SQL-projected procedures via action/query and reads
 // results back out of a result global. This is the entire remote substrate
 // (driver-plan §5 task 8, risk B2); remote exec/data/cover/admin all sit on it.
@@ -20,11 +20,13 @@ import (
 	"github.com/vista-cloud-dev/m-iris/internal/atelier"
 )
 
-//go:embed runner/m_iris.Runner.cls
+//go:embed runner/m.iris.Runner.cls
 var runnerSource string
 
-// runnerDoc is the Atelier docname of the runner class.
-const runnerDoc = "m_iris.Runner.cls"
+// runnerDoc is the Atelier docname of the runner class. Package "m.iris" (dots,
+// no underscore — IRIS class names forbid underscores) projects its SqlProcs
+// into the SQL schema "m_iris", so the m_iris.* SQL calls below are unchanged.
+const runnerDoc = "m.iris.Runner.cls"
 
 // AtelierAPI is the slice of the Atelier client the remote transport needs. It
 // is narrowed to an interface so unit tests inject a fake (recording PUT/Compile

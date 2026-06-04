@@ -23,12 +23,32 @@ type Status struct {
 	Summary string     `json:"summary,omitempty"`
 }
 
+// errCode is an Atelier error code, rendered as a JSON string by older servers
+// and as a JSON number by IRIS 2026.1+. It is normalized to a string either way.
+type errCode string
+
+func (c *errCode) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*c = errCode(s)
+		return nil
+	}
+	*c = errCode(b) // numeric code → its literal text (e.g. 16006)
+	return nil
+}
+
 // APIError decodes both forms Atelier servers have used across versions: the
 // object form ({"error":"…","code":"…"}) and the bare-string form.
 type APIError struct {
-	Error string `json:"error"`
-	Code  string `json:"code,omitempty"`
-	ID    string `json:"id,omitempty"`
+	Error string  `json:"error"`
+	Code  errCode `json:"code,omitempty"`
+	ID    string  `json:"id,omitempty"`
 }
 
 // UnmarshalJSON accepts either a JSON string or a JSON object.

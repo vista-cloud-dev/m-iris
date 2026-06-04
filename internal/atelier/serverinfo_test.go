@@ -7,9 +7,11 @@ import (
 	"testing"
 )
 
-// TestServerInfo_RoundTrip drives the Atelier root probe (GET /api/atelier/v1/),
-// the foundation of lifecycle status / health / doctor: it returns the engine
-// version + the namespaces the credential can see.
+// TestServerInfo_RoundTrip drives the Atelier root probe, the foundation of
+// lifecycle status / health / doctor: it returns the engine version + the
+// namespaces the credential can see. The probe targets the UNVERSIONED root
+// (/api/atelier/) — the version-prefixed root 404s on modern IRIS (validated
+// against IRIS 2026.1).
 func TestServerInfo_RoundTrip(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,8 +28,8 @@ func TestServerInfo_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ServerInfo: %v", err)
 	}
-	if gotPath != "/api/atelier/v1/" {
-		t.Errorf("path = %q, want /api/atelier/v1/", gotPath)
+	if gotPath != "/api/atelier/" {
+		t.Errorf("path = %q, want /api/atelier/ (unversioned root)", gotPath)
 	}
 	if info.Version != "IRIS for UNIX (Ubuntu Server LTS) 2024.1" || info.API != 7 {
 		t.Errorf("info = %+v", info)
