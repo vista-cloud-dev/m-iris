@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	mdriver "github.com/vista-cloud-dev/m-driver-sdk"
 	"github.com/vista-cloud-dev/m-iris/clikit"
 	"github.com/vista-cloud-dev/m-iris/internal/atelier"
 	"github.com/vista-cloud-dev/m-iris/internal/config"
@@ -27,16 +28,12 @@ type lifecycleCmd struct {
 	Destroy   lifeDestroyCmd   `cmd:"" help:"Remove an instance/namespace (remote: unsupported over Atelier, exit 7)."`
 }
 
-// lifecycleStatus is the status/probe payload (driver-contract §5.1).
-type lifecycleStatus struct {
-	Transport  string   `json:"transport"`
-	Running    bool     `json:"running"`
-	Healthy    bool     `json:"healthy"`
-	Version    string   `json:"version,omitempty"`
-	Namespaces []string `json:"namespaces,omitempty"`
-	LatencyMs  int64    `json:"latencyMs"`
-	Endpoint   string   `json:"endpoint,omitempty"`
-}
+// The lifecycle status/state payloads are SDK-owned so m-ydb and m-iris emit
+// identical JSON m-cli reads (aliases keep the existing literals/renderers).
+type (
+	lifecycleStatus = mdriver.Status
+	lifeStateResult = mdriver.StateResult
+)
 
 // remoteOnly returns a not-yet-implemented error for local/docker (only remote
 // is wired today) and nil for remote. An empty transport defaults to remote.
@@ -135,11 +132,6 @@ func (c lifeStatusCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 // --- lifecycle up / down / restart ------------------------------------------
 
 type lifeUpCmd struct{}
-
-type lifeStateResult struct {
-	State    string `json:"state"`
-	Endpoint string `json:"endpoint,omitempty"`
-}
 
 func (lifeUpCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	if err := remoteOnly(conn); err != nil {

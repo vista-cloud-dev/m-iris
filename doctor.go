@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	mdriver "github.com/vista-cloud-dev/m-driver-sdk"
 	"github.com/vista-cloud-dev/m-iris/clikit"
 	"github.com/vista-cloud-dev/m-iris/internal/atelier"
 	"github.com/vista-cloud-dev/m-iris/internal/config"
@@ -21,18 +22,12 @@ const minIRISYear = 2022
 // 0 all green, 6 engine-unreachable, 5 a check failed.
 type doctorCmd struct{}
 
-type doctorCheck struct {
-	Name   string `json:"name"`
-	OK     bool   `json:"ok"`
-	Detail string `json:"detail,omitempty"`
-	Fix    string `json:"fix,omitempty"`
-}
-
-type doctorResult struct {
-	Transport string        `json:"transport"`
-	OK        bool          `json:"ok"`
-	Checks    []doctorCheck `json:"checks"`
-}
+// The doctor payload shapes are SDK-owned so m-ydb and m-iris emit identical
+// JSON m-cli reads (aliases keep the existing literals/renderers unchanged).
+type (
+	doctorCheck  = mdriver.Check
+	doctorResult = mdriver.DoctorResult
+)
 
 func (doctorCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	if err := remoteOnly(conn); err != nil {
