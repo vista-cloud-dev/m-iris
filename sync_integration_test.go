@@ -65,8 +65,11 @@ func TestSyncAxis_RealEngine(t *testing.T) {
 	}
 
 	// push --from: create the scratch routine on the instance + mirror + manifest.
+	// Modern IRIS .mac UDL requires a `ROUTINE name [Type=MAC]` header line — a
+	// real-engine requirement the fake tier doesn't enforce (IRIS 2026.1).
+	header := "ROUTINE " + bare + " [Type=MAC]\n"
 	from := t.TempDir()
-	if err := os.WriteFile(filepath.Join(from, docname), []byte(bare+" ;m-iris IT scratch\n quit\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(from, docname), []byte(header+bare+" ;m-iris IT scratch\n quit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cc, buf := jsonCtx()
@@ -87,7 +90,7 @@ func TestSyncAxis_RealEngine(t *testing.T) {
 	}
 
 	// diff: edit the mirror copy → the instance↔mirror diff surfaces the change.
-	if err := os.WriteFile(conn.Layout().RoutinePath(docname), []byte(bare+" ;m-iris IT scratch\n ; edited\n quit\n"), 0o644); err != nil {
+	if err := os.WriteFile(conn.Layout().RoutinePath(docname), []byte(header+bare+" ;m-iris IT scratch\n ; edited\n quit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cc, buf = jsonCtx()

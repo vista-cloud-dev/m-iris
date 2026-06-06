@@ -72,12 +72,26 @@ func (c *Client) PutDoc(ctx context.Context, name string, content []string) (*Pu
 	}
 	res := &PutResult{Name: name}
 	if len(env.Result) > 0 {
-		var doc Doc
-		if err := json.Unmarshal(env.Result, &doc); err == nil {
-			res.TS = doc.TS
-			if doc.Name != "" {
-				res.Name = doc.Name
-			}
+		// A save-time rejection (e.g. #16021 Illegal Header Line on a modern .mac
+		// without a `ROUTINE name [Type=MAC]` header) is reported HTTP 200 with the
+		// reason in the *per-document* result.status — NOT in status.errors[], so
+		// c.do does not catch it and an unguarded PUT would silently not store the
+		// routine. Decode the result fields we need directly (result.content is a
+		// "" on rejection vs a [] on success, so it cannot decode into Doc).
+		var pd struct {
+			Name   string `json:"name"`
+			TS     string `json:"ts"`
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal(env.Result, &pd); err != nil {
+			return nil, fmt.Errorf("atelier: decode PUT result for %q: %w", name, err)
+		}
+		if strings.TrimSpace(pd.Status) != "" {
+			return nil, fmt.Errorf("atelier: PUT %q rejected by the server: %s", name, pd.Status)
+		}
+		res.TS = pd.TS
+		if pd.Name != "" {
+			res.Name = pd.Name
 		}
 	}
 	return res, nil
@@ -122,10 +136,16 @@ func (c *Client) Stat(ctx context.Context, name string) (DocName, bool, error) {
 }
 
 // isNotFound reports whether an error is Atelier's "document does not exist"
-// signal (the server returns it in status.errors, mapped to a Go error).
+// signal. Modern IRIS (2026.1) answers GET /doc/{name} for a missing document
+// with a bare HTTP 404; older servers embed "does not exist"/#5002 in
+// status.errors. Recognize both so Stat/DeleteDoc treat an absent doc as
+// not-found (exists=false) rather than a hard error.
 func isNotFound(err error) bool {
 	if err == nil {
 		return false
+	}
+	if hasStatus(err, http.StatusNotFound) {
+		return true
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "does not exist") ||
