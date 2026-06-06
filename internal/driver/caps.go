@@ -23,7 +23,7 @@ func CapsDoc() mdriver.Caps {
 		Axes: mdriver.Axes{
 			// M0 — meta + the existing irissync source verbs, regrouped under sync.
 			Meta: []string{"caps", "version", "info", "schema", "doctor"},
-			Sync: []string{"list", "pull", "status", "verify", "push", "deploy"},
+			Sync: []string{"list", "pull", "status", "verify", "push", "deploy", "diff", "rm"},
 			// M1 — lifecycle + health probes. provision/destroy are advertised but
 			// report unsupported (exit 7) on the remote transport (risk B4).
 			Lifecycle: []string{"up", "down", "restart", "status", "wait", "provision", "destroy"},

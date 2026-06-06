@@ -34,6 +34,38 @@ Legend: ☑ done · ◐ in progress · ☐ not started
 - ☐ local/docker lifecycle (container / `iris start`/`iris stop`) — needs the
   session-transport command seam (lands with M3 local+docker exec).
 
+## M2 — sync axis ☑ (plan §5 task 6)
+
+The sync axis reaches 8-verb parity with m-ydb. The irissync source verbs were
+already regrouped under `sync` in M0 (`list`/`pull`/`status`/`verify`/`push`/
+`deploy`); M2 adds the inspect/delete/author verbs and tightens the filter.
+
+- ☑ `sync diff <name> [--from DIR]` — unified diff of the instance copy (GET
+  over Atelier, gated by `Stat` so an absent routine diffs as a pure
+  addition/deletion) vs the local mirror, or a `--from` directory. `{ unified }`.
+  Diff engine is `internal/udiff` (LCS, single hunk, 3-line context), ported
+  byte-identical from m-ydb.
+- ☑ `sync rm <name>` — removes a routine from the instance (`DeleteDoc`), the
+  mirror, and the manifest; honors `--dry-run`. `{ removed }`. A routine already
+  absent is reported, not an error.
+- ☑ `push --from DIR` — pushes routines from an arbitrary directory (incl. fresh
+  creates the manifest has never seen). Content is staged into the mirror, so
+  push's conflict-check / single-writer lock / compile-on-import path runs
+  unchanged; the up-to-date short-circuit reads the `--from` copy so `--dry-run`
+  is accurate.
+- ☑ Bare-name `--filter` — the glob matches the extension-stripped routine name
+  (`DG*`/`DGREG` select `DGREG.mac`; `*.mac` never matches), parity with m-ydb
+  `source.Match` and driver-contract §5.2.
+- ☑ `caps` advertises all 8 sync verbs (honest gate; golden regenerated); the
+  `meta schema` tree picks up diff/rm automatically.
+- ◐ Real-engine tier: `TestSyncAxis_RealEngine` (package `main`, gated on
+  `M_IRIS_IT=1` + `M_IRIS_*`, `make test-it`) pulls/pushes/diffs/removes an
+  ephemeral `zzMIRISIT` scratch routine against a live IRIS, self-cleaning. The
+  verbs ride the GET/PUT/DELETE doc + docnames endpoints already validated
+  against IRIS CE 2026.1 in M1; the gated round-trip was not executed this
+  session (the disposable `m-test-iris` container was down and docker/curl were
+  sandbox-blocked) — run `make test-it` once the container is up.
+
 ## Remote spike (plan §5 task 8) — substrate built, real-engine green gated ◐
 
 The remote substrate is the whole-cloth de-risking item (risk B2): Atelier has no
@@ -60,8 +92,11 @@ runner class. Built and **unit-proven**; real-engine green runs in CI.
 - `do @ref` / `set @ref=value` name-indirection over a global reference string.
 
 ## Next
-- M1 lifecycle + health probes + `doctor`; wire the `local`/`docker` (`iris
-  session`) Transport strategies alongside `remote`.
+- **M3 exec** — wire the remote runner Transport (already built + spiked) into
+  `exec load`/`run`/`eval`/`abort`; parse IRIS faults into the §7 `engineError`;
+  `--prefix` ephemeral runs. Then build the `local`/`docker` (`iris session`)
+  Transport strategies (which also unblock the deferred docker/local
+  `lifecycle up`/`down`).
 - Phase-0 SDK reconciliation with m-ydb (see below).
 
 ## SDK reconciliation note (Phase-0)

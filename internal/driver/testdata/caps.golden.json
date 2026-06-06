@@ -22,7 +22,9 @@
       "status",
       "verify",
       "push",
-      "deploy"
+      "deploy",
+      "diff",
+      "rm"
     ],
     "meta": [
       "caps",

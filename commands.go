@@ -437,19 +437,26 @@ func scopeManifest(man *manifest.Manifest, glob, pkg string) ([]string, error) {
 }
 
 // match reports whether docname passes the package prefix and glob filter.
-// An empty pkg/glob matches everything.
+// An empty pkg/glob matches everything. The --filter glob is matched against the
+// extension-stripped bare name (driver-contract §5.2, parity with m-ydb), so
+// "DG*"/"DGREG" select DGREG.mac but "*.mac" never matches.
 func match(docname, glob, pkg string) (bool, error) {
 	if pkg != "" && !strings.HasPrefix(docname, pkg) {
 		return false, nil
 	}
 	if glob != "" {
-		ok, err := path.Match(glob, docname)
+		ok, err := path.Match(glob, bareName(docname))
 		if err != nil {
 			return false, fmt.Errorf("invalid --filter %q: %w", glob, err)
 		}
 		return ok, nil
 	}
 	return true, nil
+}
+
+// bareName strips a routine's type extension: "DGREG.mac" → "DGREG".
+func bareName(docname string) string {
+	return strings.TrimSuffix(docname, path.Ext(docname))
 }
 
 func docNames(docs []atelier.DocName) []string {

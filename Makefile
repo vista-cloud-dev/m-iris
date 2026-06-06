@@ -43,7 +43,7 @@ IRIS_PASSWORD ?= testsys
 test-it:
 	M_IRIS_IT=1 M_IRIS_BASE_URL=$(IRIS_BASE_URL) M_IRIS_NAMESPACE=$(IRIS_NAMESPACE) \
 		M_IRIS_USER=$(IRIS_USER) M_IRIS_PASSWORD=$(IRIS_PASSWORD) \
-		go test $(GOFLAGS) -count=1 -run RealEngine ./internal/remote/ -v
+		go test $(GOFLAGS) -count=1 -run RealEngine . ./internal/remote/ -v
 
 tidy:
 	go mod tidy

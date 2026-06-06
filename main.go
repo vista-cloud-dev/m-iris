@@ -16,6 +16,8 @@
 //	m-iris sync verify    re-hash mirror files against the manifest (exit 3)
 //	m-iris sync push      write edited routines back to IRIS (the sole DB writer)
 //	m-iris sync deploy    install a routine-source library (--prune true-sync)
+//	m-iris sync diff      unified diff of one routine: instance vs mirror/--from
+//	m-iris sync rm        remove a routine from instance + mirror + manifest
 //
 // Later milestones add the lifecycle, exec, data, cover, admin, and native
 // axes; caps grows to advertise each as it lands (caps is honest by
@@ -45,7 +47,7 @@ type CLI struct {
 
 	Meta      metaCmd      `cmd:"" help:"Introspection + power tools: caps / info / version / schema."`
 	Lifecycle lifecycleCmd `cmd:"" help:"Manage the engine instance: up / down / restart / status / wait / provision / destroy."`
-	Sync      syncCmd      `cmd:"" help:"Source axis: routine source ↔ instance (list / pull / status / verify / push / deploy)."`
+	Sync      syncCmd      `cmd:"" help:"Source axis: routine source ↔ instance (list / pull / status / verify / push / deploy / diff / rm)."`
 
 	InstallCompletions kongplete.InstallCompletions `cmd:"" help:"Install shell tab-completions."`
 }
@@ -54,15 +56,18 @@ type CLI struct {
 // verbs, regrouped. The read verbs (list/pull/status/verify) are safe by
 // construction (every IRIS operation is a GET; writes go only to the local
 // mirror); push is the opt-in write path and the sole DB writer (locked +
-// conflict-checked); deploy installs a routine-source library. M2 adds diff/rm
-// and the bare-name --filter.
+// conflict-checked); deploy installs a routine-source library; diff/rm are the
+// inspect/delete counterparts. The --filter glob is bare-name (extension
+// stripped), matching m-ydb (driver-contract §5.2).
 type syncCmd struct {
-	List   listCmd   `cmd:"" help:"List server routine docnames (no writes) — connectivity + inventory."`
-	Pull   pullCmd   `cmd:"" help:"Materialize IRIS routine source → mirror, incremental via the manifest."`
-	Status statusCmd `cmd:"" help:"Diff server vs. local manifest: new / changed / deleted (exit 3 on drift)."`
-	Verify verifyCmd `cmd:"" help:"Re-hash mirror files against the manifest (exit 3 on mismatch)."`
-	Push   pushCmd   `cmd:"" help:"Write edited routines back to IRIS (PUT + compile) — the sole DB writer; conflict-checked + single-writer-locked (exit 4 on refusal)."`
-	Deploy deployCmd `cmd:"" help:"Install a routine-source library (e.g. m-stdlib/src) into a namespace over Atelier (PUT + compile); --prune for a true sync."`
+	List   listCmd     `cmd:"" help:"List server routine docnames (no writes) — connectivity + inventory."`
+	Pull   pullCmd     `cmd:"" help:"Materialize IRIS routine source → mirror, incremental via the manifest."`
+	Status statusCmd   `cmd:"" help:"Diff server vs. local manifest: new / changed / deleted (exit 3 on drift)."`
+	Verify verifyCmd   `cmd:"" help:"Re-hash mirror files against the manifest (exit 3 on mismatch)."`
+	Push   pushCmd     `cmd:"" help:"Write edited routines back to IRIS (PUT + compile) — the sole DB writer; conflict-checked + single-writer-locked (exit 4 on refusal)."`
+	Deploy deployCmd   `cmd:"" help:"Install a routine-source library (e.g. m-stdlib/src) into a namespace over Atelier (PUT + compile); --prune for a true sync."`
+	Diff   syncDiffCmd `cmd:"" help:"Unified diff of one routine: instance vs the local mirror (or --from DIR)."`
+	Rm     syncRmCmd   `cmd:"" help:"Remove a routine from the instance + mirror + manifest (honors --dry-run)."`
 }
 
 func main() {
