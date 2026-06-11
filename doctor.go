@@ -34,18 +34,10 @@ func (doctorCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 		return err
 	}
 	res, exit := runDoctorRemote(context.Background(), conn)
-	if err := cc.Result(res, func() { renderDoctor(cc, res) }); err != nil {
-		return err
-	}
-	switch exit {
-	case clikit.ExitUnreachable:
-		return clikit.Fail(clikit.ExitUnreachable, "UNREACHABLE",
-			"engine unreachable — fix connectivity before other checks", "verify --base-url / network")
-	case clikit.ExitRuntime:
-		return clikit.Fail(clikit.ExitRuntime, "PREFLIGHT_FAILED",
-			"one or more preflight checks failed", "see the failing checks above")
-	}
-	return nil
+	// doctor's payload is a full report even on a non-zero outcome, so emit the
+	// data envelope with the resolved exit (0 / 5 / 6) — the envelope's exit then
+	// matches the process exit (driver-contract §2).
+	return cc.ResultExit(res, exit, func() { renderDoctor(cc, res) })
 }
 
 // runDoctorRemote runs the remote (Atelier) check matrix and returns the typed

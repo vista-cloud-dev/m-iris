@@ -21,6 +21,7 @@ Pinned: `m-driver-sdk v0.2.0`. Branch: `m-iris-driver`. Transports: local·docke
 | M8 | conformance green local+docker+remote | ☐ | release gate |
 | DRV | **public `irisdriver` facade** | ☑ | `New(Config)→(mdriver.Transport,error)` over Atelier REST + runner; the importable seam for in-process embedders (vendor logic stays internal/). **Live-validated vs m-test-iris (2026.1):** New→Health→Exec($zv via result-global) returns the IRIS banner. |
 | CFM | **`meta version` conformance fix** | ☑ | Was the shared `clikit.VersionCmd` (`{version,commit,date,go}`) — non-conformant: contract §5.7 version = `{driver,engine,contract,build}` (caught by `m-driver-conformance`). Replaced with a driver-specific `versionCmd` emitting `{driver:"m-iris",engine:"iris",contract,build{…}}`; clikit untouched (byte-identical). **Conformance now 16/16 live vs m-test-iris (remote).** |
+| CFM2 | **clikit `ResultExit` + doctor envelope/exit** | ☑ | Mirrored the shared clikit fix (byte-identical with m-ydb): `Context.ResultExit(data, exit, text)` so `meta doctor` emits its data envelope with the resolved exit (0/5/6) and `Run` returns `cc.ExitCode()`. doctor's unreachable path now emits `ok=false, exit=6` with process exit 6 (was the latent `cc.Result`-then-`Fail` stdout-exit-0 mismatch). Conformance stays 16/16 live. |
 
 **Cross-engine note (for VistaEngine):** IRIS `Exec` captures the **result-global**
 `^mIrisRun(rid,"out")`, NOT device `W` output — the runner `xecute`s with no IO
