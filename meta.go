@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 
 	mdriver "github.com/vista-cloud-dev/m-driver-sdk"
 	"github.com/vista-cloud-dev/m-iris/clikit"
@@ -13,11 +14,57 @@ import (
 // caps/version/info/schema are wired now; doctor (M1), selftest (M8), native +
 // shell (M7) join as their milestones land — and caps grows to advertise them.
 type metaCmd struct {
-	Caps    capsCmd           `cmd:"" help:"Emit the capability document (axes, transports, features) m-cli reads before calling optional verbs."`
-	Info    infoCmd           `cmd:"" help:"Driver identity + resolved engine target (edition/version filled by the M1 probe)."`
-	Doctor  doctorCmd         `cmd:"" help:"Typed preflight: reachable / auth / version / namespace / query-privilege / license (exit 0/5/6)."`
-	Version clikit.VersionCmd `cmd:"" help:"Show version and build info."`
-	Schema  clikit.SchemaCmd  `cmd:"" help:"Emit the command/flag tree as JSON (agent discovery)."`
+	Caps    capsCmd          `cmd:"" help:"Emit the capability document (axes, transports, features) m-cli reads before calling optional verbs."`
+	Info    infoCmd          `cmd:"" help:"Driver identity + resolved engine target (edition/version filled by the M1 probe)."`
+	Doctor  doctorCmd        `cmd:"" help:"Typed preflight: reachable / auth / version / namespace / query-privilege / license (exit 0/5/6)."`
+	Version versionCmd       `cmd:"" help:"Show driver/engine/contract identity + build info (contract §5.7)."`
+	Schema  clikit.SchemaCmd `cmd:"" help:"Emit the command/flag tree as JSON (agent discovery)."`
+}
+
+// --- meta version ------------------------------------------------------------
+
+// versionCmd emits the contract §5.7 version shape {driver, engine, contract,
+// build}. engine + contract identify the driver to m-cli (it refuses an
+// unknown major); build carries the link-time clikit build metadata. (The
+// generic clikit build info alone is not contract-conformant — it lacks
+// engine/contract — so meta version is driver-specific while clikit stays
+// engine-agnostic and byte-identical across drivers.)
+type versionCmd struct{}
+
+type versionBuild struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+	Date    string `json:"date"`
+	Go      string `json:"go"`
+}
+
+type versionResult struct {
+	Driver   string       `json:"driver"`
+	Engine   string       `json:"engine"`
+	Contract string       `json:"contract"`
+	Build    versionBuild `json:"build"`
+}
+
+func (versionCmd) Run(cc *clikit.Context) error {
+	res := versionResult{
+		Driver:   "m-iris",
+		Engine:   "iris",
+		Contract: mdriver.ContractVersion,
+		Build: versionBuild{
+			Version: clikit.Version, Commit: clikit.Commit, Date: clikit.Date, Go: runtime.Version(),
+		},
+	}
+	return cc.Result(res, func() {
+		cc.Title("m-iris — version")
+		cc.KV(
+			[2]string{"driver", res.Driver},
+			[2]string{"engine", res.Engine},
+			[2]string{"contract", res.Contract},
+			[2]string{"build", cc.Accent(res.Build.Version)},
+			[2]string{"commit", res.Build.Commit},
+			[2]string{"go", res.Build.Go},
+		)
+	})
 }
 
 // --- meta caps ---------------------------------------------------------------

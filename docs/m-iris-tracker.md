@@ -19,7 +19,8 @@ Pinned: `m-driver-sdk v0.2.0`. Branch: `m-iris-driver`. Transports: local·docke
 | M6 | admin (backup/restore/check/journal) | ☐ | |
 | M7 | native passthrough (iris/atelier/sql) | ☐ | |
 | M8 | conformance green local+docker+remote | ☐ | release gate |
-| DRV | **public `irisdriver` facade** | ☑ | `New(Config)→(mdriver.Transport,error)` over Atelier REST + runner; the importable seam for m-cli/VistaEngine (vendor logic stays internal/). **Live-validated vs m-test-iris (2026.1):** New→Health→Exec($zv via result-global) returns the IRIS banner. |
+| DRV | **public `irisdriver` facade** | ☑ | `New(Config)→(mdriver.Transport,error)` over Atelier REST + runner; the importable seam for in-process embedders (vendor logic stays internal/). **Live-validated vs m-test-iris (2026.1):** New→Health→Exec($zv via result-global) returns the IRIS banner. |
+| CFM | **`meta version` conformance fix** | ☑ | Was the shared `clikit.VersionCmd` (`{version,commit,date,go}`) — non-conformant: contract §5.7 version = `{driver,engine,contract,build}` (caught by `m-driver-conformance`). Replaced with a driver-specific `versionCmd` emitting `{driver:"m-iris",engine:"iris",contract,build{…}}`; clikit untouched (byte-identical). **Conformance now 16/16 live vs m-test-iris (remote).** |
 
 **Cross-engine note (for VistaEngine):** IRIS `Exec` captures the **result-global**
 `^mIrisRun(rid,"out")`, NOT device `W` output — the runner `xecute`s with no IO
