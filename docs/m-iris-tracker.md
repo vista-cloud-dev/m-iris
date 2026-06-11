@@ -19,7 +19,14 @@ Pinned: `m-driver-sdk v0.2.0`. Branch: `m-iris-driver`. Transports: local·docke
 | M6 | admin (backup/restore/check/journal) | ☐ | |
 | M7 | native passthrough (iris/atelier/sql) | ☐ | |
 | M8 | conformance green local+docker+remote | ☐ | release gate |
+| DRV | **public `irisdriver` facade** | ☑ | `New(Config)→(mdriver.Transport,error)` over Atelier REST + runner; the importable seam for m-cli/VistaEngine (vendor logic stays internal/). **Live-validated vs m-test-iris (2026.1):** New→Health→Exec($zv via result-global) returns the IRIS banner. |
+
+**Cross-engine note (for VistaEngine):** IRIS `Exec` captures the **result-global**
+`^mIrisRun(rid,"out")`, NOT device `W` output — the runner `xecute`s with no IO
+redirection, so a command must write its result into that global (remote.Exec
+returns it as Stdout). YottaDB Exec captures session stdout directly. So the unified
+"W $ZV" readiness/version probe is **`Health()` (+ Version)**, not `Exec("W $ZV")`.
 
 **needs SDK:** (record here any shared shape M3+ requires that isn't in the pinned
-SDK yet, for the coordinator to batch — none currently; M3 exec uses v0.2.0's
-`Exec`/`EngineError`.)
+SDK yet, for the coordinator to batch — none currently; the facade + M3 exec use
+v0.2.0's `Exec`/`EngineError`.)
