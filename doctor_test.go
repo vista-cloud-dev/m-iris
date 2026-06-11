@@ -81,8 +81,10 @@ func TestDoctor_AuthFailExit5(t *testing.T) {
 	srv := doctorServer(http.StatusUnauthorized, nil)
 	defer srv.Close()
 	cc, buf := jsonCtx()
-	err := (doctorCmd{}).Run(cc, doctorConn(srv.URL, "VISTA"))
-	if code := exitOf(t, err); code != clikit.ExitRuntime {
+	if err := (doctorCmd{}).Run(cc, doctorConn(srv.URL, "VISTA")); err != nil {
+		t.Fatalf("doctor should not return an error (the data envelope carries the outcome): %v", err)
+	}
+	if code := cc.ExitCode(); code != clikit.ExitRuntime {
 		t.Fatalf("auth-fail doctor exit = %d, want %d", code, clikit.ExitRuntime)
 	}
 	d := decodeDoctor(t, buf.Bytes())
@@ -99,8 +101,10 @@ func TestDoctor_UnreachableExit6(t *testing.T) {
 	srv := doctorServer(0, nil)
 	srv.Close() // refuse connections
 	cc, _ := jsonCtx()
-	err := (doctorCmd{}).Run(cc, doctorConn(srv.URL, "VISTA"))
-	if code := exitOf(t, err); code != clikit.ExitUnreachable {
+	if err := (doctorCmd{}).Run(cc, doctorConn(srv.URL, "VISTA")); err != nil {
+		t.Fatalf("doctor should not return an error: %v", err)
+	}
+	if code := cc.ExitCode(); code != clikit.ExitUnreachable {
 		t.Fatalf("unreachable doctor exit = %d, want %d", code, clikit.ExitUnreachable)
 	}
 }
@@ -111,8 +115,10 @@ func TestDoctor_NamespaceMissingExit5(t *testing.T) {
 	srv := doctorServer(0, []string{"%SYS", "USER"})
 	defer srv.Close()
 	cc, buf := jsonCtx()
-	err := (doctorCmd{}).Run(cc, doctorConn(srv.URL, "VISTA"))
-	if code := exitOf(t, err); code != clikit.ExitRuntime {
+	if err := (doctorCmd{}).Run(cc, doctorConn(srv.URL, "VISTA")); err != nil {
+		t.Fatalf("doctor should not return an error: %v", err)
+	}
+	if code := cc.ExitCode(); code != clikit.ExitRuntime {
 		t.Fatalf("missing-namespace doctor exit = %d, want %d", code, clikit.ExitRuntime)
 	}
 	d := decodeDoctor(t, buf.Bytes())
