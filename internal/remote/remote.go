@@ -10,11 +10,13 @@ package remote
 import (
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	mdriver "github.com/vista-cloud-dev/m-driver-sdk"
 	"github.com/vista-cloud-dev/m-iris/internal/atelier"
@@ -23,10 +25,21 @@ import (
 //go:embed runner/m.iris.Runner.cls
 var runnerSource string
 
+//go:embed runner/mIrisIO.int
+var ioHelperSource string
+
 // runnerDoc is the Atelier docname of the runner class. Package "m.iris" (dots,
 // no underscore — IRIS class names forbid underscores) projects its SqlProcs
 // into the SQL schema "m_iris", so the m_iris.* SQL calls below are unchanged.
 const runnerDoc = "m.iris.Runner.cls"
+
+// ioHelperDoc is the Atelier docname of the companion IO-capture routine the
+// runner's RunRef/Eval call (start^mIrisIO / stop^mIrisIO) to redirect a
+// script's principal-device WRITE output into ^mIrisRun(rid,"out"). It is a
+// classic .int routine because %Device.ReDirectIO dispatches each WRITE to
+// mnemonic-space *routine* labels (wstr/wchr/wnl/…), which a class method
+// cannot host.
+const ioHelperDoc = "mIrisIO.int"
 
 // AtelierAPI is the slice of the Atelier client the remote transport needs. It
 // is narrowed to an interface so unit tests inject a fake (recording PUT/Compile
@@ -36,6 +49,10 @@ type AtelierAPI interface {
 	PutDoc(ctx context.Context, name string, content []string) (*atelier.PutResult, error)
 	Compile(ctx context.Context, names []string, flags string) (*atelier.CompileResult, error)
 	Query(ctx context.Context, sql string, params ...string) ([]map[string]string, error)
+	// CloseIdleConnections drops pooled keep-alive connections so a follow-up
+	// query opens a fresh one (exec recovers a run's result over a clean process
+	// after a device-corrupting install).
+	CloseIdleConnections()
 }
 
 // Transport is the remote (Atelier REST + SQL runner) strategy. It satisfies
@@ -61,7 +78,11 @@ func (t *Transport) ensureRunner(ctx context.Context) error {
 	if _, err := t.api.PutDoc(ctx, runnerDoc, lines); err != nil {
 		return fmt.Errorf("remote: deploy runner: %w", err)
 	}
-	res, err := t.api.Compile(ctx, []string{runnerDoc}, "cuk")
+	ioLines := strings.Split(strings.TrimRight(ioHelperSource, "\n"), "\n")
+	if _, err := t.api.PutDoc(ctx, ioHelperDoc, irisRoutineLines(ioHelperDoc, ioLines)); err != nil {
+		return fmt.Errorf("remote: deploy IO helper: %w", err)
+	}
+	res, err := t.api.Compile(ctx, []string{runnerDoc, ioHelperDoc}, "cuk")
 	if err != nil {
 		return fmt.Errorf("remote: compile runner: %w", err)
 	}
@@ -90,39 +111,79 @@ func (t *Transport) Exec(ctx context.Context, req mdriver.ExecRequest) (mdriver.
 	}
 	rid := runID(req.Prefix)
 
-	var rows []map[string]string
-	var err error
+	var qerr error
 	switch {
 	case req.Command != "":
-		rows, err = t.api.Query(ctx, "SELECT m_iris.Eval(?,?) AS status", rid, req.Command)
+		_, qerr = t.api.Query(ctx, "SELECT m_iris.Eval(?,?) AS status", rid, req.Command)
 	case req.EntryRef != "":
-		rows, err = t.api.Query(ctx, "SELECT m_iris.RunRef(?,?,?) AS status",
+		_, qerr = t.api.Query(ctx, "SELECT m_iris.RunRef(?,?,?) AS status",
 			rid, req.EntryRef, strings.Join(req.Args, "\x01"))
 	default:
 		return mdriver.ExecResult{}, fmt.Errorf("remote: exec needs an entryref or a command")
 	}
-	if err != nil {
-		return mdriver.ExecResult{}, err
-	}
 
-	status := firstCol(rows, "status")
+	// The run records status/out/error in ^mIrisRun(rid,*) and sets "done" last.
+	// A KIDS install (EN^XPDIJ) can corrupt THIS SqlProc's gateway process/device,
+	// so the action/query returns an empty/lost body (qerr) AND that process keeps
+	// spoiling responses for a moment — so don't trust qerr or the response row.
+	// Recover the outcome from the globals, retrying on fresh connections until a
+	// clean process serves the read; "done" gates it (missing → the run truly did
+	// not run).
+	status, out, eng, rerr := t.recoverRun(ctx, rid)
+	if rerr != nil {
+		if qerr != nil {
+			return mdriver.ExecResult{}, qerr
+		}
+		return mdriver.ExecResult{}, rerr
+	}
 	switch status {
 	case "7":
 		return mdriver.ExecResult{}, fmt.Errorf("remote: runner refused — caller lacks the m_iris_runner role / action-query privilege")
 	case "5":
-		eng, rerr := t.readEngineError(ctx, rid)
-		if rerr != nil {
-			return mdriver.ExecResult{}, rerr
-		}
 		return mdriver.ExecResult{Status: 5, EngineError: eng}, nil
-	}
-
-	out, err := t.getGlobal(ctx, fmt.Sprintf(`^mIrisRun(%q,"out")`, rid))
-	if err != nil {
-		return mdriver.ExecResult{}, err
 	}
 	st, _ := strconv.Atoi(status)
 	return mdriver.ExecResult{Stdout: out, Status: st}, nil
+}
+
+// recoverRun reads a run's outcome (status, captured out, §7 fault) from
+// ^mIrisRun(rid,*) after the run query. A device-corrupting install spoils the
+// gateway process/connection that served the run, so the first read(s) may come
+// back empty; retry, dropping pooled connections each time so a fresh one lands
+// on a clean process, until "done" is readable (or the budget is exhausted).
+func (t *Transport) recoverRun(ctx context.Context, rid string) (status, out string, eng *mdriver.EngineError, err error) {
+	doneRef := fmt.Sprintf(`^mIrisRun(%q,"done")`, rid)
+	statusRef := fmt.Sprintf(`^mIrisRun(%q,"status")`, rid)
+	var last error
+	for attempt := 0; attempt < 20; attempt++ {
+		t.api.CloseIdleConnections()
+		done, derr := t.getGlobal(ctx, doneRef)
+		if derr == nil && done == "1" {
+			st, serr := t.getGlobal(ctx, statusRef)
+			if serr != nil {
+				return "", "", nil, serr
+			}
+			if st == "5" {
+				e, eerr := t.readEngineError(ctx, rid)
+				return "5", "", e, eerr
+			}
+			o, oerr := t.getOut(ctx, rid)
+			if oerr != nil {
+				return "", "", nil, oerr
+			}
+			return st, o, nil, nil
+		}
+		last = derr
+		select {
+		case <-ctx.Done():
+			return "", "", nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	if last != nil {
+		return "", "", nil, last
+	}
+	return "", "", nil, fmt.Errorf("remote: run did not complete (no result recorded for %q)", rid)
 }
 
 // readEngineError reads ^mIrisRun(rid,"error") and parses the §7 frame
@@ -172,6 +233,32 @@ func (t *Transport) SetGlobal(ctx context.Context, ref, value string) error {
 	return nil
 }
 
+// getOut reads the captured result-global text for a run, Base64-encoded by the
+// runner so control bytes (a KIDS install's ANSI/terminal output) survive the
+// action/query JSON transport — a raw read truncates at the first non-text byte,
+// dropping the trailing result markers v-pkg parses. IRIS Base64Encode may wrap
+// the encoded text at 76 columns, so strip whitespace before decoding.
+func (t *Transport) getOut(ctx context.Context, rid string) (string, error) {
+	rows, err := t.api.Query(ctx, "SELECT m_iris.GetOut(?) AS out", rid)
+	if err != nil {
+		return "", err
+	}
+	b64 := strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == ' ' || r == '\t' {
+			return -1
+		}
+		return r
+	}, firstCol(rows, "out"))
+	if b64 == "" {
+		return "", nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return "", fmt.Errorf("remote: decode captured output: %w", err)
+	}
+	return string(raw), nil
+}
+
 func (t *Transport) getGlobal(ctx context.Context, ref string) (string, error) {
 	rows, err := t.api.Query(ctx, "SELECT m_iris.GetGlobal(?) AS value", ref)
 	if err != nil {
@@ -194,8 +281,8 @@ func (t *Transport) Load(ctx context.Context, req mdriver.LoadRequest) (mdriver.
 		if rerr != nil {
 			return mdriver.LoadResult{}, rerr
 		}
-		name := req.Prefix + filepath.Base(f)
-		if _, perr := t.api.PutDoc(ctx, name, splitLines(string(content))); perr != nil {
+		name := req.Prefix + irisDocname(filepath.Base(f))
+		if _, perr := t.api.PutDoc(ctx, name, irisRoutineLines(name, splitLines(string(content)))); perr != nil {
 			return mdriver.LoadResult{}, perr
 		}
 		loaded = append(loaded, name)
@@ -206,6 +293,42 @@ func (t *Transport) Load(ctx context.Context, req mdriver.LoadRequest) (mdriver.
 		}
 	}
 	return mdriver.LoadResult{Loaded: loaded}, nil
+}
+
+// irisDocname maps a routine-source basename to a valid IRIS Atelier docname.
+// The neutral routine extension ".m" (what m-cli / the SDK Client and v-pkg
+// stage) is NOT an Atelier routine type, so a ".m" doc never stages and a
+// later `exec run EN^<rtn>` cannot resolve it. Map it to ".int" — classic
+// MUMPS intermediate code, matching the label + space-indented body the SDK
+// routine-wrap emits. Names that already carry an IRIS extension
+// (.mac/.int/.inc/.cls) pass through unchanged.
+func irisDocname(base string) string {
+	if strings.EqualFold(filepath.Ext(base), ".m") {
+		return strings.TrimSuffix(base, filepath.Ext(base)) + ".int"
+	}
+	return base
+}
+
+// irisRoutineLines ensures a routine doc carries the UDL header Atelier requires
+// as its first line — `ROUTINE <name> [Type=INT|MAC|INC]` — derived from the
+// docname. Without it the server rejects the PUT (#16021 "Illegal Header Line")
+// even though the body's first line is a valid routine label. A doc that already
+// leads with a `ROUTINE ` header (e.g. one round-tripped out of IRIS) or a
+// non-routine type (.cls carries its own `Class …` header) passes through
+// unchanged.
+func irisRoutineLines(docname string, lines []string) []string {
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(docname), "."))
+	switch ext {
+	case "int", "mac", "inc":
+	default:
+		return lines
+	}
+	if len(lines) > 0 && strings.HasPrefix(lines[0], "ROUTINE ") {
+		return lines
+	}
+	name := strings.TrimSuffix(filepath.Base(docname), filepath.Ext(docname))
+	header := fmt.Sprintf("ROUTINE %s [Type=%s]", name, strings.ToUpper(ext))
+	return append([]string{header}, lines...)
 }
 
 // Health proves the remote substrate is reachable AND that the caller actually

@@ -48,6 +48,7 @@ type CLI struct {
 	Meta      metaCmd      `cmd:"" help:"Introspection + power tools: caps / info / version / schema."`
 	Lifecycle lifecycleCmd `cmd:"" help:"Manage the engine instance: up / down / restart / status / wait / provision / destroy."`
 	Sync      syncCmd      `cmd:"" help:"Source axis: routine source ↔ instance (list / pull / status / verify / push / deploy / diff / rm)."`
+	Exec      execCmd      `cmd:"" help:"Exec axis: run M against the namespace (load / run / eval) via the remote runner."`
 
 	InstallCompletions kongplete.InstallCompletions `cmd:"" help:"Install shell tab-completions."`
 }

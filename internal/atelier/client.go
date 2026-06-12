@@ -111,6 +111,13 @@ func New(cfg Config) (*Client, error) {
 // Namespace returns the namespace this client targets.
 func (c *Client) Namespace() string { return c.namespace }
 
+// CloseIdleConnections drops pooled keep-alive connections. The remote exec path
+// calls it after a run that can corrupt the IRIS gateway process's device (a
+// KIDS install reconfigures the principal device, losing that request's response
+// body), so the follow-up result reads open a fresh connection — a clean gateway
+// process — instead of reusing the corrupted one.
+func (c *Client) CloseIdleConnections() { c.hc.CloseIdleConnections() }
+
 // endpoint builds an absolute URL for the given path segments under the base.
 // Segments are kept in URL.Path (decoded form) so URL.String() percent-encodes
 // reserved characters — important for routine names like "%ZVISTA.mac".

@@ -26,6 +26,11 @@
       "diff",
       "rm"
     ],
+    "exec": [
+      "load",
+      "run",
+      "eval"
+    ],
     "meta": [
       "caps",
       "version",

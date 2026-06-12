@@ -2,6 +2,10 @@ package remote
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,6 +18,7 @@ import (
 // dispatching on the SQL + bound parameters, modelling ^mIrisRun.
 type fakeAPI struct {
 	puts     []string
+	putBody  map[string][]string // docname → content (last PUT)
 	compiles [][]string
 	globals  map[string]string // global ref → value (the result global)
 	runFault *clikit3Engine    // if set, the next RunRef faults with this frame
@@ -22,11 +27,33 @@ type fakeAPI struct {
 // clikit3Engine mirrors the runner's "mnemonic|routine|line|text" error frame.
 type clikit3Engine struct{ mnemonic, routine, line, text string }
 
-func newFakeAPI() *fakeAPI { return &fakeAPI{globals: map[string]string{}} }
+func newFakeAPI() *fakeAPI {
+	return &fakeAPI{globals: map[string]string{}, putBody: map[string][]string{}}
+}
 
-func (f *fakeAPI) PutDoc(_ context.Context, name string, _ []string) (*atelier.PutResult, error) {
+// PutDoc models the real Atelier rejection a fake without it misses: a routine
+// doc (.int/.mac/.inc) whose first line is not a `ROUTINE … [Type=…]` UDL header
+// is refused #16021 ("Illegal Header Line"), so the transport MUST add the header
+// (irisRoutineLines) before staging.
+func (f *fakeAPI) PutDoc(_ context.Context, name string, content []string) (*atelier.PutResult, error) {
+	switch ext(name) {
+	case "int", "mac", "inc":
+		if len(content) == 0 || !strings.HasPrefix(content[0], "ROUTINE ") {
+			return nil, fmt.Errorf("atelier: PUT %q rejected: ERROR #16021: Illegal Header Line", name)
+		}
+	}
 	f.puts = append(f.puts, name)
+	f.putBody[name] = content
 	return &atelier.PutResult{Name: name}, nil
+}
+
+func (f *fakeAPI) CloseIdleConnections() {}
+
+func ext(name string) string {
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		return strings.ToLower(name[i+1:])
+	}
+	return ""
 }
 
 func (f *fakeAPI) Compile(_ context.Context, names []string, _ string) (*atelier.CompileResult, error) {
@@ -38,6 +65,7 @@ func (f *fakeAPI) Query(_ context.Context, sql string, params ...string) ([]map[
 	switch {
 	case strings.Contains(sql, "RunRef"):
 		rid := params[0]
+		f.globals[`^mIrisRun("`+rid+`","done")`] = "1"
 		if f.runFault != nil {
 			f.globals[`^mIrisRun("`+rid+`","status")`] = "5"
 			f.globals[`^mIrisRun("`+rid+`","error")`] = strings.Join(
@@ -47,7 +75,14 @@ func (f *fakeAPI) Query(_ context.Context, sql string, params ...string) ([]map[
 		f.globals[`^mIrisRun("`+rid+`","status")`] = "0"
 		return []map[string]string{{"status": "0"}}, nil
 	case strings.Contains(sql, "Eval"):
+		rid := params[0]
+		f.globals[`^mIrisRun("`+rid+`","done")`] = "1"
+		f.globals[`^mIrisRun("`+rid+`","status")`] = "0"
 		return []map[string]string{{"status": "0"}}, nil
+	case strings.Contains(sql, "GetOut"):
+		rid := params[0]
+		enc := base64.StdEncoding.EncodeToString([]byte(f.globals[`^mIrisRun("`+rid+`","out")`]))
+		return []map[string]string{{"out": enc}}, nil
 	case strings.Contains(sql, "SetGlobal"):
 		f.globals[params[0]] = params[1]
 		return []map[string]string{{"ok": "1"}}, nil
@@ -73,9 +108,9 @@ func TestRemoteExec_DeploysRunnerOnceAndRunsClean(t *testing.T) {
 	if res.Status != 0 || res.EngineError != nil {
 		t.Errorf("clean run = %+v, want status 0 no engineError", res)
 	}
-	// Runner deployed exactly once...
-	if len(api.puts) != 1 || api.puts[0] != runnerDoc {
-		t.Errorf("puts = %v, want one %s", api.puts, runnerDoc)
+	// Runner + IO helper deployed exactly once, in one compile...
+	if len(api.puts) != 2 || api.puts[0] != runnerDoc || api.puts[1] != ioHelperDoc {
+		t.Errorf("puts = %v, want [%s %s]", api.puts, runnerDoc, ioHelperDoc)
 	}
 	if len(api.compiles) != 1 {
 		t.Errorf("compiles = %v, want one", api.compiles)
@@ -84,7 +119,7 @@ func TestRemoteExec_DeploysRunnerOnceAndRunsClean(t *testing.T) {
 	if _, err := tr.Exec(ctx, mdriver.ExecRequest{EntryRef: "OTHER^RTN", Prefix: "zzt42"}); err != nil {
 		t.Fatalf("second Exec: %v", err)
 	}
-	if len(api.puts) != 1 {
+	if len(api.puts) != 2 {
 		t.Errorf("runner re-deployed: puts = %v", api.puts)
 	}
 }
@@ -106,6 +141,47 @@ func TestRemoteExec_FaultBecomesEngineError(t *testing.T) {
 	}
 	if res.EngineError.Mnemonic != "<UNDEFINED>" || res.EngineError.Routine != "XLFISO" || res.EngineError.Line != 12 {
 		t.Errorf("engineError = %+v, want <UNDEFINED> XLFISO:12", res.EngineError)
+	}
+}
+
+// TestLoad_MapsDotMToIntDocname proves Load stages a neutral ".m" routine
+// source under a valid IRIS routine docname (".int", classic MUMPS) — ".m" is
+// not an Atelier routine extension, so a docname kept as "ZVPKGINS.m" would
+// never stage and `exec run EN^ZVPKGINS` would then fail to resolve. Other
+// extensions (already-valid IRIS docnames) pass through unchanged.
+func TestLoad_MapsDotMToIntDocname(t *testing.T) {
+	dir := t.TempDir()
+	dotM := filepath.Join(dir, "ZVPKGINS.m")
+	if err := os.WriteFile(dotM, []byte("ZVPKGINS ;gen\nEN ;\n Q\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dotMac := filepath.Join(dir, "ALREADY.mac")
+	if err := os.WriteFile(dotMac, []byte("ALREADY ;x\n q\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	api := newFakeAPI()
+	tr := New(api)
+	res, err := tr.Load(context.Background(), mdriver.LoadRequest{Paths: []string{dotM, dotMac}})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	wantLoaded := []string{"ZVPKGINS.int", "ALREADY.mac"}
+	if len(res.Loaded) != 2 || res.Loaded[0] != wantLoaded[0] || res.Loaded[1] != wantLoaded[1] {
+		t.Errorf("Loaded = %v, want %v", res.Loaded, wantLoaded)
+	}
+	// The runner is PUT once (ensureRunner) plus the two staged docs; assert the
+	// staged docnames, not the runner doc.
+	staged := api.puts[len(api.puts)-2:]
+	if staged[0] != "ZVPKGINS.int" {
+		t.Errorf("staged .m doc = %q, want ZVPKGINS.int", staged[0])
+	}
+	if staged[1] != "ALREADY.mac" {
+		t.Errorf("staged .mac doc = %q, want ALREADY.mac (unchanged)", staged[1])
+	}
+	// The staged .int must lead with the UDL routine header (else Atelier #16021).
+	if got := api.putBody["ZVPKGINS.int"][0]; got != "ROUTINE ZVPKGINS [Type=INT]" {
+		t.Errorf("ZVPKGINS.int header = %q, want ROUTINE ZVPKGINS [Type=INT]", got)
 	}
 }
 

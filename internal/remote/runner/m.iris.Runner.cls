@@ -51,10 +51,18 @@ ClassMethod RunRef(rid As %String, ref As %String, args As %String = "") As %Int
 	kill ^mIrisRun(rid)
 	set ^mIrisRun(rid,"status")=0
 	try {
+		do start^mIrisIO(rid)
 		do @ref
+		do stop^mIrisIO()
 	} catch ex {
+		do stop^mIrisIO()
 		do ..fault(rid,ex)
 	}
+	// "done" lets the caller recover the outcome from ^mIrisRun even when this
+	// SqlProc's HTTP response body is lost — a KIDS install can corrupt the
+	// response device so the action/query returns an empty body, but the run's
+	// status/out/error are already committed to the global here.
+	set ^mIrisRun(rid,"done")=1
 	quit ^mIrisRun(rid,"status")
 }
 
@@ -66,11 +74,27 @@ ClassMethod Eval(rid As %String, cmd As %String) As %Integer [ SqlName = "Eval",
 	kill ^mIrisRun(rid)
 	set ^mIrisRun(rid,"status")=0
 	try {
+		do start^mIrisIO(rid)
 		xecute cmd
+		do stop^mIrisIO()
 	} catch ex {
+		do stop^mIrisIO()
 		do ..fault(rid,ex)
 	}
+	set ^mIrisRun(rid,"done")=1
 	quit ^mIrisRun(rid,"status")
+}
+
+/// GetOut returns ^mIrisRun(rid,"out") Base64-encoded so a runner result that
+/// contains control bytes — a KIDS install's ANSI/terminal output (ESC, CR, page
+/// controls) — survives the action/query JSON transport intact. A raw read of
+/// such a value truncates/mangles at the first non-text byte, dropping the
+/// trailing result markers. (contract: Stdout = runner result-global text.)
+/// SQL:  SELECT m_iris.GetOut(?)
+ClassMethod GetOut(rid As %String) As %String [ SqlName = "GetOut", SqlProc ]
+{
+	if '..authorized() quit ""
+	quit $system.Encryption.Base64Encode($get(^mIrisRun(rid,"out")))
 }
 
 /// GetGlobal returns $get(@ref); ref is a full global reference, e.g.
