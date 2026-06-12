@@ -15,14 +15,17 @@ import (
 
 	"github.com/vista-cloud-dev/m-iris/internal/atelier"
 	"github.com/vista-cloud-dev/m-iris/internal/mirror"
+	"github.com/vista-cloud-dev/m-iris/internal/session"
 )
 
 // Conn is embedded in the root CLI struct, so its fields are global flags on
 // every subcommand, and bound (via kong.Bind) so command Run methods receive a
 // *Conn. Flags win over env; defaults fill the rest.
 type Conn struct {
-	Transport    string `env:"M_IRIS_TRANSPORT" enum:"local,docker,remote" default:"remote" help:"Engine transport: local | docker | remote (Atelier REST). Only remote is wired today."`
+	Transport    string `env:"M_IRIS_TRANSPORT" enum:"local,docker,remote" default:"remote" help:"Engine transport: local | docker (iris session) | remote (Atelier REST)."`
 	BaseURL      string `name:"base-url" env:"M_IRIS_BASE_URL" help:"Atelier base URL, e.g. https://host:52773/api/atelier/v1/" placeholder:"URL"`
+	Container    string `env:"M_IRIS_CONTAINER" help:"docker transport: container name to exec into (iris session runs inside it)." placeholder:"NAME"`
+	IrisInstance string `name:"iris-instance" env:"M_IRIS_IRIS_INSTANCE" default:"IRIS" help:"local/docker transport: IRIS instance name for 'iris session <instance>'." placeholder:"NAME"`
 	Instance     string `env:"M_IRIS_INSTANCE" help:"Instance label used in the mirror path." placeholder:"NAME"`
 	Namespace    string `env:"M_IRIS_NAMESPACE" help:"IRIS namespace to liberate." placeholder:"NS"`
 	Mirror       string `env:"M_IRIS_MIRROR" default:".m-cache" help:"Mirror root directory."`
@@ -105,6 +108,16 @@ func readSecret(inline, file string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(b)), nil
+}
+
+// Session maps the connection onto the local/docker session transport config.
+func (c *Conn) Session() session.Config {
+	return session.Config{
+		Transport: c.Transport,
+		Container: c.Container,
+		Instance:  c.IrisInstance,
+		Namespace: c.Namespace,
+	}
 }
 
 // Layout builds the mirror layout from the connection flags.

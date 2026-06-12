@@ -33,6 +33,37 @@ argument exec`, exit 2, which the Client swallowed). Fixed, all in m-iris:
   with `ROUTINE `, and `.cls`). **The fake tier missed this — only the live engine
   caught it** (encoded back into the fake's `PutDoc` as a #16021 guard).
 
+## M3 DONE — docker/local `iris session` transport (added 2026-06-12)
+`internal/session` implements `mdriver.Transport`+`Abort` over `iris session
+<instance> -U <ns>` (docker = `docker exec -i <container> iris session …`; local =
+bare, host-unvalidated — no host IRIS here). **Device `W` captured DIRECTLY off the
+principal device** — none of the remote/Atelier mIrisIO-redirect or
+global-recovery machinery is needed (that whole mess is a remote-only problem).
+**`transport.go` selector** `newExecTransport(conn)→execTransport` (=`mdriver.Transport`
++`Abort`) picks remote vs session; exec/lifecycle/doctor are now transport-agnostic
+(status/up/down/restart/wait + doctor dispatch to a session probe; docker `up`=
+`docker start`+wait-healthy, `down`=`docker stop`; remote/local `down`=detach no-op).
+New config: `--container`/`M_IRIS_CONTAINER`, `--iris-instance`/`M_IRIS_IRIS_INSTANCE`
+(default `IRIS`). **Conformance 16/16 on BOTH remote AND docker.** Live tier
+`TestSessionAxis_RealEngine` (gated `M_IRIS_IT=1`+`M_IRIS_CONTAINER`; `make test-it`
+now runs `. ./internal/remote/ ./internal/session/`).
+
+**Capture protocol (live-proven, the crux):** an `iris session` reading stdin runs
+each line independently at the `USER>` prompt — so a **`$ZTRAP` set on a prior line
+does NOT fire** (the error prints inline and the next line still runs). Fault capture
+therefore uses a **single-line TRY/CATCH** in the same physical line as the code:
+`write "@@MIRIS-BEGIN@@",! set st=0,em="" try { xecute mcmd } catch ex { set st=5,em=
+ex.Name_"|"_$piece(ex.Location,"^",2)_"|"_… } write "@@MIRIS-RESULT@@",st,"|",em,! halt`.
+Parser takes text between BEGIN and RESULT as stdout, then `<st>|<mnem|rtn|line|text>`.
+User cmd carried as an escaped ObjectScript string literal (double the `"`) and
+`xecute`'d (so a syntax error is caught, not a wrapper crash). Load = pipe source into
+the container (`docker exec -i … sh -c 'cat > /tmp/X.int'`) / host temp file for local,
+then `$system.OBJ.Load(path,"ck")` (compile fault → LoadResult.EngineError). ReadGlobal
+Base64-encodes the value (control-byte safe, like remote GetOut).
+**De-flake note:** `TestRemoteAbort_RealEngine` was flaky ("run never registered a
+pid") under concurrent runner PUT+compile from two transports — fixed by pre-deploying
+the runner on both (a `ReadGlobal` calls `ensureRunner`) before the timing-sensitive poll.
+
 ## exec abort (added 2026-06-12 — closes the last exec verb)
 Abort over the synchronous Atelier path needs a live target, so the runner now
 records its OWN `$job` into `^mIrisRun(rid,"pid")` (set right after `status`, and

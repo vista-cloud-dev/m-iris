@@ -191,6 +191,17 @@ func TestRemoteAbort_RealEngine(t *testing.T) {
 		_, _ = ctlClient.Query(ctx, "SELECT m_iris.KillGlobal(?)", `^mIrisRun("`+rid+`")`)
 	})
 
+	// Pre-deploy the runner on BOTH transports before the timing-sensitive part:
+	// ReadGlobal calls ensureRunner, so the later `hang` Eval registers its pid
+	// immediately instead of racing a concurrent PUT+compile of the runner class.
+	pidRef := `^mIrisRun("` + rid + `","pid")`
+	if _, err := runTr.ReadGlobal(ctx, mdriver.GlobalRef{Ref: pidRef}); err != nil {
+		t.Fatalf("warm up run transport: %v", err)
+	}
+	if _, err := ctlTr.ReadGlobal(ctx, mdriver.GlobalRef{Ref: pidRef}); err != nil {
+		t.Fatalf("warm up ctl transport: %v", err)
+	}
+
 	// Launch a long-running run; it sets ^mIrisRun(rid,"pid")=$job then hangs.
 	done := make(chan struct{})
 	go func() {
@@ -198,11 +209,10 @@ func TestRemoteAbort_RealEngine(t *testing.T) {
 		_, _ = runTr.Exec(ctx, mdriver.ExecRequest{Command: "hang 30", Prefix: rid})
 	}()
 
-	// Wait until the run has registered its process (deploys the runner on the
-	// ctl transport's first read; idempotent with the run transport's deploy).
+	// Wait until the run has registered its process.
 	var pid string
 	for i := 0; i < 100; i++ {
-		node, rerr := ctlTr.ReadGlobal(ctx, mdriver.GlobalRef{Ref: `^mIrisRun("` + rid + `","pid")`})
+		node, rerr := ctlTr.ReadGlobal(ctx, mdriver.GlobalRef{Ref: pidRef})
 		if rerr == nil && node.Value != "" {
 			pid = node.Value
 			break

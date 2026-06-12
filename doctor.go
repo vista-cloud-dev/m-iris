@@ -11,6 +11,7 @@ import (
 	"github.com/vista-cloud-dev/m-iris/clikit"
 	"github.com/vista-cloud-dev/m-iris/internal/atelier"
 	"github.com/vista-cloud-dev/m-iris/internal/config"
+	"github.com/vista-cloud-dev/m-iris/internal/session"
 )
 
 // minIRISYear is the oldest IRIS major (release year) m-iris supports.
@@ -30,14 +31,58 @@ type (
 )
 
 func (doctorCmd) Run(cc *clikit.Context, conn *config.Conn) error {
-	if err := remoteOnly(conn); err != nil {
-		return err
+	ctx := context.Background()
+	var res doctorResult
+	var exit int
+	switch conn.Transport {
+	case "", mdriver.TransportRemote:
+		res, exit = runDoctorRemote(ctx, conn)
+	case mdriver.TransportDocker, mdriver.TransportLocal:
+		res, exit = runDoctorSession(ctx, conn)
+	default:
+		return remoteOnly(conn)
 	}
-	res, exit := runDoctorRemote(context.Background(), conn)
 	// doctor's payload is a full report even on a non-zero outcome, so emit the
 	// data envelope with the resolved exit (0 / 5 / 6) — the envelope's exit then
 	// matches the process exit (driver-contract §2).
 	return cc.ResultExit(res, exit, func() { renderDoctor(cc, res) })
+}
+
+// runDoctorSession runs the local/docker check matrix: config inputs present, the
+// container is running (docker), `iris session` answers with a supported version,
+// and the target namespace is usable. It returns the typed result + exit (0/5/6).
+func runDoctorSession(ctx context.Context, conn *config.Conn) (doctorResult, int) {
+	res := doctorResult{Transport: conn.Transport}
+	add := func(name string, ok bool, detail, fix string) {
+		res.Checks = append(res.Checks, doctorCheck{Name: name, OK: ok, Detail: detail, Fix: fix})
+	}
+	if err := validateSession(conn); err != nil {
+		add("config", false, err.Error(), "set --namespace (and --container for docker), or M_IRIS_* env")
+		return finalize(res), clikit.ExitRuntime
+	}
+	add("config", true, "namespace + transport inputs present", "")
+
+	sess := session.New(conn.Session(), nil)
+	h, err := sess.Health(ctx)
+	switch {
+	case err != nil:
+		add("reachable", false, "iris session did not launch: "+err.Error(),
+			"check the container is running (docker) or iris is on PATH (local)")
+		skipDownstream(add, "unreachable")
+		return finalize(res), clikit.ExitUnreachable
+	case !h.Healthy:
+		add("reachable", false, "iris session launched but did not answer",
+			"check the IRIS instance "+conn.IrisInstance+" is started and the namespace exists")
+		skipDownstream(add, "no answer")
+		return finalize(res), clikit.ExitUnreachable
+	}
+	add("reachable", true, "iris session answered", "")
+	add("auth", true, "session runs as the instance user", "")
+	add(versionOK(h.Version))
+	add("namespace", true, "running in namespace "+conn.Namespace, "")
+	add("query-privilege", true, "session executes ObjectScript directly (no SQL gateway)", "")
+	add("license", true, "not probed (session has a console connection)", "")
+	return finalize(res), exitFor(res)
 }
 
 // runDoctorRemote runs the remote (Atelier) check matrix and returns the typed

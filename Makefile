@@ -40,10 +40,13 @@ IRIS_BASE_URL ?= http://localhost:52774/api/atelier/v1/
 IRIS_NAMESPACE ?= USER
 IRIS_USER ?= _SYSTEM
 IRIS_PASSWORD ?= testsys
+IRIS_CONTAINER ?= m-test-iris
+IRIS_INSTANCE ?= IRIS
 test-it:
 	M_IRIS_IT=1 M_IRIS_BASE_URL=$(IRIS_BASE_URL) M_IRIS_NAMESPACE=$(IRIS_NAMESPACE) \
 		M_IRIS_USER=$(IRIS_USER) M_IRIS_PASSWORD=$(IRIS_PASSWORD) \
-		go test $(GOFLAGS) -count=1 -run RealEngine . ./internal/remote/ -v
+		M_IRIS_CONTAINER=$(IRIS_CONTAINER) M_IRIS_IRIS_INSTANCE=$(IRIS_INSTANCE) \
+		go test $(GOFLAGS) -count=1 -run RealEngine . ./internal/remote/ ./internal/session/ -v
 
 tidy:
 	go mod tidy

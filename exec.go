@@ -8,17 +8,16 @@ import (
 	mdriver "github.com/vista-cloud-dev/m-driver-sdk"
 	"github.com/vista-cloud-dev/m-iris/clikit"
 	"github.com/vista-cloud-dev/m-iris/internal/config"
-	"github.com/vista-cloud-dev/m-iris/internal/remote"
 )
 
-// execCmd is the exec axis (driver-contract §5.3) over the IRIS `remote`
-// transport: run M against the attached namespace through the m.iris.Runner
-// substrate. load PUT+compiles routine source over Atelier (neutral .m source is
-// staged as a classic .int routine); run executes an entryref and eval one
-// command, each through the runner's fault trap that surfaces a structured
-// engineError (§7) on a runtime fault. All three ride internal/remote.Transport
-// — the substrate the remote spike de-risked; this axis wires it to the CLI so
-// the SDK reference Client (and therefore `v pkg install`) can drive a lifecycle.
+// execCmd is the exec axis (driver-contract §5.3): run M against the attached
+// namespace. It is written against execTransport (newExecTransport selects the
+// strategy by --transport), so every verb works on remote (Atelier PUT +
+// m.iris.Runner SQL substrate, output recovered from a result global) and on
+// local/docker (`iris session`, device output captured directly). load stages +
+// compiles routine source (neutral .m → .int); run/eval execute an entryref / one
+// command under a fault trap that surfaces a structured engineError (§7); abort
+// stops a run still in flight under its ephemeral --prefix.
 type execCmd struct {
 	Load  execLoadCmd  `cmd:"" name:"load" help:"Stage routine source into the namespace (Atelier PUT) and compile it; neutral .m → .int. Compile faults surface as engineError."`
 	Run   execRunCmd   `cmd:"" name:"run" help:"Run an entryref (LABEL^ROUTINE) through the runner; args → the formallist. Faults surface as engineError."`
@@ -36,19 +35,6 @@ type execLoadResult struct {
 	Compiled bool     `json:"compiled"`
 }
 
-// remoteTransport builds the remote (Atelier REST + runner) transport for the
-// exec axis, after refusing the not-yet-wired local/docker transports.
-func remoteTransport(conn *config.Conn) (*remote.Transport, error) {
-	if err := remoteOnly(conn); err != nil {
-		return nil, err
-	}
-	client, err := remoteClient(conn)
-	if err != nil {
-		return nil, err
-	}
-	return remote.New(client), nil
-}
-
 // --- load --------------------------------------------------------------------
 
 type execLoadCmd struct {
@@ -60,7 +46,7 @@ func (c *execLoadCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	if len(c.Paths) == 0 {
 		return clikit.Fail(clikit.ExitUsage, "NO_SOURCE", "exec load needs <paths…>", "")
 	}
-	tr, err := remoteTransport(conn)
+	tr, err := newExecTransport(conn)
 	if err != nil {
 		return err
 	}
@@ -105,7 +91,7 @@ func (c *execAbortCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	if c.Prefix == "" {
 		return clikit.Fail(clikit.ExitUsage, "NO_PREFIX", "exec abort needs --prefix", "")
 	}
-	tr, err := remoteTransport(conn)
+	tr, err := newExecTransport(conn)
 	if err != nil {
 		return err
 	}
@@ -138,7 +124,7 @@ func (c *execEvalCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 // fault becomes an ok=false envelope with engineError (exit 5); otherwise
 // {stdout, status}.
 func runExec(cc *clikit.Context, conn *config.Conn, req mdriver.ExecRequest) error {
-	tr, err := remoteTransport(conn)
+	tr, err := newExecTransport(conn)
 	if err != nil {
 		return err
 	}
