@@ -163,6 +163,45 @@ func TestReadGlobal_DecodesBase64(t *testing.T) {
 	}
 }
 
+func TestKillGlobal_BuildsIndirectKill(t *testing.T) {
+	fr := &fakeRun{fn: func(string) (CmdOutput, error) {
+		return CmdOutput{Stdout: sessionStdout("", 0, "")}, nil
+	}}
+	s := New(dockerCfg(), fr.run)
+	if err := s.KillGlobal(context.Background(), `^mFix("a")`); err != nil {
+		t.Fatalf("KillGlobal: %v", err)
+	}
+	if !strings.Contains(fr.lastStdin, `kill @(`) {
+		t.Errorf("kill stdin did not build an indirect kill:\n%s", fr.lastStdin)
+	}
+}
+
+func TestQueryGlobal_DecodesNodeList(t *testing.T) {
+	// Two nodes as the session writes them: Base64(ref)<TAB>Base64(value) per line.
+	node := func(ref, val string) string {
+		return base64.StdEncoding.EncodeToString([]byte(ref)) + "\t" +
+			base64.StdEncoding.EncodeToString([]byte(val)) + "\n"
+	}
+	captured := node(`^mFix("a")`, "1") + node(`^mFix("a","sub")`, "2")
+	fr := &fakeRun{fn: func(stdin string) (CmdOutput, error) {
+		// the walk runs against the principal device, bracketed by the markers
+		return CmdOutput{Stdout: sessionStdout(captured, 0, "")}, nil
+	}}
+	s := New(dockerCfg(), fr.run)
+	nodes, err := s.QueryGlobal(context.Background(), `^mFix("a")`, "forward", 0)
+	if err != nil {
+		t.Fatalf("QueryGlobal: %v", err)
+	}
+	if len(nodes) != 2 || nodes[0].Ref != `^mFix("a")` || nodes[0].Value != "1" {
+		t.Fatalf("nodes = %+v, want the 2 ^mFix(\"a\") subtree nodes", nodes)
+	}
+	// reverse order is carried into the $query direction.
+	_, _ = s.QueryGlobal(context.Background(), `^mFix`, "reverse", 2)
+	if !strings.Contains(fr.lastStdin, "qdir=-1") || !strings.Contains(fr.lastStdin, "qd=2") {
+		t.Errorf("query stdin did not carry order/depth:\n%s", fr.lastStdin)
+	}
+}
+
 func TestAbort_ReportsTerminatedPid(t *testing.T) {
 	fr := &fakeRun{fn: func(string) (CmdOutput, error) {
 		// The session abort eval writes the terminated pid into the captured region.

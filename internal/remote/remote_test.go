@@ -49,6 +49,17 @@ func (f *fakeAPI) PutDoc(_ context.Context, name string, content []string) (*ate
 
 func (f *fakeAPI) CloseIdleConnections() {}
 
+// inSubtree models the runner's $name(@cur,bl)=ref containment: a node is in the
+// subtree of ref iff ref is ref itself or a parent reference. Approximated for the
+// fake by matching ref's leading subscripts (strip the closing paren so
+// ^X("a") contains ^X("a","sub")).
+func inSubtree(node, ref string) bool {
+	if node == ref {
+		return true
+	}
+	return strings.HasPrefix(node, strings.TrimSuffix(ref, ")"))
+}
+
 func ext(name string) string {
 	if i := strings.LastIndex(name, "."); i >= 0 {
 		return strings.ToLower(name[i+1:])
@@ -96,6 +107,27 @@ func (f *fakeAPI) Query(_ context.Context, sql string, params ...string) ([]map[
 	case strings.Contains(sql, "SetGlobal"):
 		f.globals[params[0]] = params[1]
 		return []map[string]string{{"ok": "1"}}, nil
+	case strings.Contains(sql, "KillGlobal"):
+		// `kill @ref` removes the node and its whole subtree.
+		for ref := range f.globals {
+			if inSubtree(ref, params[0]) {
+				delete(f.globals, ref)
+			}
+		}
+		return []map[string]string{{"ok": "1"}}, nil
+	case strings.Contains(sql, "QueryGlobal"):
+		// Model the runner's node list: every stored global in the query ref's
+		// subtree, as Base64(ref)<TAB>Base64(value) lines.
+		var b strings.Builder
+		for ref, val := range f.globals {
+			if inSubtree(ref, params[0]) {
+				b.WriteString(base64.StdEncoding.EncodeToString([]byte(ref)))
+				b.WriteByte('\t')
+				b.WriteString(base64.StdEncoding.EncodeToString([]byte(val)))
+				b.WriteByte('\n')
+			}
+		}
+		return []map[string]string{{"nodes": b.String()}}, nil
 	case strings.Contains(sql, "GetGlobal"):
 		return []map[string]string{{"value": f.globals[params[0]]}}, nil
 	case strings.Contains(sql, "SELECT 1"):
@@ -243,6 +275,36 @@ func TestRemoteData_SetGetRoundTrip(t *testing.T) {
 	}
 	if node.Value != "hello" {
 		t.Errorf("read-back = %q, want hello", node.Value)
+	}
+}
+
+// TestRemoteData_KillAndQuery proves data.kill removes a node and data.query
+// returns the subtree's nodes decoded from the runner's Base64 node list.
+func TestRemoteData_KillAndQuery(t *testing.T) {
+	api := newFakeAPI()
+	tr := New(api)
+	ctx := context.Background()
+	for ref, val := range map[string]string{
+		`^mFix("a")`:       "1",
+		`^mFix("a","sub")`: "2",
+		`^mOther("z")`:     "9",
+	} {
+		if err := tr.SetGlobal(ctx, ref, val); err != nil {
+			t.Fatalf("SetGlobal %s: %v", ref, err)
+		}
+	}
+	nodes, err := tr.QueryGlobal(ctx, `^mFix("a")`, "forward", 0)
+	if err != nil {
+		t.Fatalf("QueryGlobal: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("query returned %d nodes, want 2 (the ^mFix(\"a\") subtree only): %+v", len(nodes), nodes)
+	}
+	if err := tr.KillGlobal(ctx, `^mFix("a")`); err != nil {
+		t.Fatalf("KillGlobal: %v", err)
+	}
+	if n, _ := tr.QueryGlobal(ctx, `^mFix("a")`, "forward", 0); len(n) != 0 {
+		t.Errorf("post-kill query returned %d nodes, want 0 (subtree killed): %+v", len(n), n)
 	}
 }
 

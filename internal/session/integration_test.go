@@ -111,6 +111,27 @@ func TestSessionAxis_RealEngine(t *testing.T) {
 		t.Errorf("read-back = %q, want %q", node.Value, want)
 	}
 
+	// 4b. query walks the subtree (and excludes a sibling); kill removes it.
+	if err := s.SetGlobal(ctx, `^mSesIT("k","sub")`, "deep"); err != nil {
+		t.Fatalf("SetGlobal sub: %v", err)
+	}
+	if err := s.SetGlobal(ctx, `^mSesIT("z")`, "sibling"); err != nil {
+		t.Fatalf("SetGlobal sibling: %v", err)
+	}
+	q, err := s.QueryGlobal(ctx, `^mSesIT("k")`, "forward", 0)
+	if err != nil {
+		t.Fatalf("QueryGlobal: %v", err)
+	}
+	if len(q) != 2 {
+		t.Fatalf("query ^mSesIT(\"k\") returned %d nodes, want 2 (excl. the \"z\" sibling): %+v", len(q), q)
+	}
+	if err := s.KillGlobal(ctx, `^mSesIT("k")`); err != nil {
+		t.Fatalf("KillGlobal: %v", err)
+	}
+	if after, _ := s.QueryGlobal(ctx, `^mSesIT("k")`, "forward", 0); len(after) != 0 {
+		t.Errorf("post-kill query = %+v, want empty", after)
+	}
+
 	// 5. abort a run still in flight (a prefixed `hang` registers its $job; abort
 	// terminates it). Two sessions: one hangs, one aborts.
 	const rid = "zzsesabort"

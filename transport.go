@@ -11,19 +11,21 @@ import (
 	"github.com/vista-cloud-dev/m-iris/internal/session"
 )
 
-// execTransport is the neutral verb-level Transport plus the driver-local Abort
-// verb (exec.abort is not an SDK Transport method — both the remote and session
-// strategies satisfy it, like m-ydb's Session.Abort). The exec axis is written
-// against this interface so it is transport-agnostic.
-type execTransport interface {
+// engineTransport is the neutral verb-level Transport plus the driver-local verbs
+// that are not on the SDK seam (exec.abort, data.kill, data.query) — both the
+// remote and session strategies satisfy it, so the exec + data axes are written
+// transport-agnostically against this interface.
+type engineTransport interface {
 	mdriver.Transport
 	Abort(ctx context.Context, prefix string) ([]string, error)
+	KillGlobal(ctx context.Context, ref string) error
+	QueryGlobal(ctx context.Context, ref, order string, depth int) ([]mdriver.GlobalNode, error)
 }
 
 // newExecTransport selects the transport strategy for the resolved connection:
 // the remote (Atelier REST + runner) transport, or the local/docker `iris
 // session` transport. It validates the inputs each strategy needs.
-func newExecTransport(conn *config.Conn) (execTransport, error) {
+func newExecTransport(conn *config.Conn) (engineTransport, error) {
 	switch conn.Transport {
 	case "", mdriver.TransportRemote:
 		client, err := remoteClient(conn)

@@ -145,6 +145,41 @@ ClassMethod Abort(rid As %String) As %String [ SqlName = "Abort", SqlProc ]
 	quit pid
 }
 
+/// QueryGlobal walks the subtree rooted at `ref` in collation order ($query) and
+/// returns its contained nodes (those whose first $qlength(ref) subscripts match
+/// ref — checked with $name(@cur,bl)=ref) as a node list: one line per node,
+/// "Base64(ref)<TAB>Base64(value)<LF>". Base64 keeps refs/values that hold control
+/// bytes intact across the action/query JSON; the LF/TAB framing is plain text.
+/// order="reverse" walks backward; depth>0 caps the levels below ref (0 =
+/// unlimited); max bounds the node count. The base node is included when it holds
+/// a value. (contract data.query)
+/// SQL:  SELECT m_iris.QueryGlobal(?,?,?)
+ClassMethod QueryGlobal(ref As %String,order As %String = "forward",depth As %Integer = 0,max As %Integer = 100000) As %String [ SqlName = "QueryGlobal", SqlProc ]
+{
+	if '..authorized() quit ""
+	set dir=$select(order="reverse":-1,1:1)
+	set bl=$qlength(ref)
+	set out="",n=0
+	if $data(@ref)#10 set out=..node(ref),n=1
+	set cur=ref
+	for {
+		set cur=$query(@cur,dir)
+		if cur="" quit
+		if $name(@cur,bl)'=ref quit
+		if (depth>0)&(($qlength(cur)-bl)>depth) continue
+		set out=out_..node(cur)
+		set n=n+1
+		if n>=max quit
+	}
+	quit out
+}
+
+/// node serializes one reference as "Base64(ref)<TAB>Base64(value)<LF>".
+ClassMethod node(ref As %String) As %String [ Private ]
+{
+	quit $system.Encryption.Base64Encode(ref)_$char(9)_$system.Encryption.Base64Encode($get(@ref))_$char(10)
+}
+
 /// Ping returns $zversion — a cheap readiness/version probe through the same
 /// substrate, so `doctor` can prove the action/query privilege, not just
 /// reachability (risks C3, C7).

@@ -32,6 +32,12 @@
       "eval",
       "abort"
     ],
+    "data": [
+      "get",
+      "set",
+      "kill",
+      "query"
+    ],
     "meta": [
       "caps",
       "version",

@@ -31,6 +31,10 @@ func CapsDoc() mdriver.Caps {
 			// in flight under its ephemeral --prefix (the runner records each run's
 			// $job and terminates a live, not-done process).
 			Exec: []string{"load", "run", "eval", "abort"},
+			// M4 — data (globals). get/set/kill/query are wired on every transport
+			// (runner SqlProcs on remote; indirect @ref + a $query walk on session).
+			// export/import (bulk %GO/%GI) land in a follow-up — not advertised yet.
+			Data: []string{"get", "set", "kill", "query"},
 		},
 		Features: mdriver.Features{
 			Remote:          true,  // IRIS reaches over Atelier REST

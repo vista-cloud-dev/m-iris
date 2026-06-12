@@ -248,6 +248,57 @@ func TestRemoteAbort_RealEngine(t *testing.T) {
 	}
 }
 
+// TestRemoteData_RealEngine proves data.query/kill ride the runner on a real
+// IRIS: a seeded subtree queries back exactly its contained nodes (a sibling is
+// excluded by the $name containment walk), and kill removes the whole subtree.
+//
+// Gated identically to the spike (M_IRIS_IT=1 + M_IRIS_* connection env).
+func TestRemoteData_RealEngine(t *testing.T) {
+	if os.Getenv("M_IRIS_IT") != "1" {
+		t.Skip("set M_IRIS_IT=1 (+ M_IRIS_* connection env) to run the real-engine data test")
+	}
+	client, err := atelier.New(atelier.Config{
+		BaseURL:   envOr("M_IRIS_BASE_URL", "http://localhost:52773/api/atelier/v1/"),
+		Namespace: envOr("M_IRIS_NAMESPACE", "USER"),
+		User:      envOr("M_IRIS_USER", "_SYSTEM"),
+		Password:  envOr("M_IRIS_PASSWORD", "SYS"),
+		Timeout:   30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("atelier client: %v", err)
+	}
+	tr := New(client)
+	ctx := context.Background()
+	t.Cleanup(func() { _ = tr.KillGlobal(ctx, `^mDataIT`) })
+
+	for ref, val := range map[string]string{
+		`^mDataIT("a")`:       "1",
+		`^mDataIT("a","sub")`: "2",
+		`^mDataIT("b")`:       "3",
+	} {
+		if err := tr.SetGlobal(ctx, ref, val); err != nil {
+			t.Fatalf("SetGlobal %s: %v", ref, err)
+		}
+	}
+	q, err := tr.QueryGlobal(ctx, `^mDataIT("a")`, "forward", 0)
+	if err != nil {
+		t.Fatalf("QueryGlobal: %v", err)
+	}
+	if len(q) != 2 {
+		t.Fatalf("query ^mDataIT(\"a\") = %d nodes, want 2 (excl. \"b\"): %+v", len(q), q)
+	}
+	if err := tr.KillGlobal(ctx, `^mDataIT("a")`); err != nil {
+		t.Fatalf("KillGlobal: %v", err)
+	}
+	whole, err := tr.QueryGlobal(ctx, `^mDataIT`, "forward", 0)
+	if err != nil {
+		t.Fatalf("QueryGlobal whole: %v", err)
+	}
+	if len(whole) != 1 || whole[0].Ref != `^mDataIT("b")` {
+		t.Fatalf("post-kill whole = %+v, want only ^mDataIT(\"b\")", whole)
+	}
+}
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

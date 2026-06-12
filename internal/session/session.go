@@ -286,6 +286,80 @@ func (s *Session) ReadGlobal(ctx context.Context, req mdriver.GlobalRef) (mdrive
 	return mdriver.GlobalNode{Ref: req.Ref, Value: string(raw)}, nil
 }
 
+// KillGlobal kills a global node / subtree via an indirect kill (data.kill).
+func (s *Session) KillGlobal(ctx context.Context, ref string) error {
+	_, status, eng, err := s.runScript(ctx, s.trapLine("kill @("+irisString(ref)+")"))
+	if err != nil {
+		return err
+	}
+	if eng != nil {
+		return fmt.Errorf("session: kill %s failed: %s %s", ref, eng.Mnemonic, eng.Text)
+	}
+	if status != 0 {
+		return fmt.Errorf("session: kill %s returned status %d", ref, status)
+	}
+	return nil
+}
+
+// QueryGlobal walks the subtree rooted at ref and returns its contained nodes
+// (data.query). It runs the $query walk directly in the session, writing each
+// contained node ("Base64(ref)<TAB>Base64(value)") to the device — captured
+// between the markers like any session command — then parseNodes decodes it. The
+// $name(@cur,bl)=ref containment check is the subtree test (collation makes the
+// subtree contiguous, so the walk quits as soon as it leaves it). order is
+// "forward"/"reverse"; depth>0 caps levels below ref (0 = the whole subtree).
+func (s *Session) QueryGlobal(ctx context.Context, ref, order string, depth int) ([]mdriver.GlobalNode, error) {
+	dir := "1"
+	if order == "reverse" {
+		dir = "-1"
+	}
+	node := `$system.Encryption.Base64Encode(qcur)_$char(9)_$system.Encryption.Base64Encode($get(@qcur))_$char(10)`
+	base := `$system.Encryption.Base64Encode(qref)_$char(9)_$system.Encryption.Base64Encode($get(@qref))_$char(10)`
+	var b strings.Builder
+	fmt.Fprintf(&b, "write %q,!\n", beginMark)
+	fmt.Fprintf(&b, "set qref=%s,qdir=%s,qd=%d,qbl=$qlength(qref)\n", irisString(ref), dir, depth)
+	fmt.Fprintf(&b, "if $data(@qref)#10 write %s\n", base)
+	// for body is the (depth-filtered) per-node write; the RESULT marker is on the
+	// next line so it is not swept into the argumentless FOR body.
+	fmt.Fprintf(&b, "set qcur=qref for  set qcur=$query(@qcur,qdir) quit:qcur=\"\"  quit:$name(@qcur,qbl)'=qref  write:'((qd>0)&((($qlength(qcur)-qbl))>qd)) %s\n", node)
+	fmt.Fprintf(&b, "write %q,\"0|\",! halt\n", endMark)
+
+	captured, _, eng, err := s.runScript(ctx, b.String())
+	if err != nil {
+		return nil, err
+	}
+	if eng != nil {
+		return nil, fmt.Errorf("session: query %s failed: %s %s", ref, eng.Mnemonic, eng.Text)
+	}
+	return parseNodes(captured)
+}
+
+// parseNodes decodes a node list ("Base64(ref)<TAB>Base64(value)" per line) into
+// flat GlobalNodes.
+func parseNodes(raw string) ([]mdriver.GlobalNode, error) {
+	var nodes []mdriver.GlobalNode
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		tab := strings.IndexByte(line, '\t')
+		if tab < 0 {
+			continue
+		}
+		ref, err := base64.StdEncoding.DecodeString(line[:tab])
+		if err != nil {
+			return nil, fmt.Errorf("session: decode query ref: %w", err)
+		}
+		val, err := base64.StdEncoding.DecodeString(line[tab+1:])
+		if err != nil {
+			return nil, fmt.Errorf("session: decode query value: %w", err)
+		}
+		nodes = append(nodes, mdriver.GlobalNode{Ref: string(ref), Value: string(val)})
+	}
+	return nodes, nil
+}
+
 // Load stages routine source into the namespace and compiles it (exec.load). The
 // neutral ".m" source maps to a ".int" docname with the UDL ROUTINE header (the
 // same rules as the remote transport), is placed in the engine's filesystem

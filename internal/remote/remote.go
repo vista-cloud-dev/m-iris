@@ -259,6 +259,58 @@ func (t *Transport) SetGlobal(ctx context.Context, ref, value string) error {
 	return nil
 }
 
+// KillGlobal kills a global node / subtree via the runner (contract data.kill).
+func (t *Transport) KillGlobal(ctx context.Context, ref string) error {
+	if err := t.ensureRunner(ctx); err != nil {
+		return err
+	}
+	if _, err := t.api.Query(ctx, "SELECT m_iris.KillGlobal(?) AS ok", ref); err != nil {
+		return err
+	}
+	return nil
+}
+
+// QueryGlobal walks the subtree rooted at ref and returns its contained nodes
+// (contract data.query). The runner returns a node list — one line per node,
+// "Base64(ref)<TAB>Base64(value)" — which parseNodes decodes. order is
+// "forward"/"reverse"; depth>0 caps levels below ref (0 = the whole subtree).
+func (t *Transport) QueryGlobal(ctx context.Context, ref, order string, depth int) ([]mdriver.GlobalNode, error) {
+	if err := t.ensureRunner(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := t.api.Query(ctx, "SELECT m_iris.QueryGlobal(?,?,?) AS nodes", ref, order, strconv.Itoa(depth))
+	if err != nil {
+		return nil, err
+	}
+	return parseNodes(firstCol(rows, "nodes"))
+}
+
+// parseNodes decodes a runner/session node list ("Base64(ref)<TAB>Base64(value)"
+// per line) into flat GlobalNodes.
+func parseNodes(raw string) ([]mdriver.GlobalNode, error) {
+	var nodes []mdriver.GlobalNode
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		tab := strings.IndexByte(line, '\t')
+		if tab < 0 {
+			continue
+		}
+		ref, err := base64.StdEncoding.DecodeString(line[:tab])
+		if err != nil {
+			return nil, fmt.Errorf("remote: decode query ref: %w", err)
+		}
+		val, err := base64.StdEncoding.DecodeString(line[tab+1:])
+		if err != nil {
+			return nil, fmt.Errorf("remote: decode query value: %w", err)
+		}
+		nodes = append(nodes, mdriver.GlobalNode{Ref: string(ref), Value: string(val)})
+	}
+	return nodes, nil
+}
+
 // getOut reads the captured result-global text for a run, Base64-encoded by the
 // runner so control bytes (a KIDS install's ANSI/terminal output) survive the
 // action/query JSON transport — a raw read truncates at the first non-text byte,
