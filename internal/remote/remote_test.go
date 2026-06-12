@@ -83,6 +83,16 @@ func (f *fakeAPI) Query(_ context.Context, sql string, params ...string) ([]map[
 		rid := params[0]
 		enc := base64.StdEncoding.EncodeToString([]byte(f.globals[`^mIrisRun("`+rid+`","out")`]))
 		return []map[string]string{{"out": enc}}, nil
+	case strings.Contains(sql, "Abort"):
+		// Mirror the runner: terminate the run's recorded pid iff it is set and
+		// the run has not completed ("done"); return "" when nothing is live.
+		rid := params[0]
+		pid := f.globals[`^mIrisRun("`+rid+`","pid")`]
+		if pid == "" || f.globals[`^mIrisRun("`+rid+`","done")`] == "1" {
+			return []map[string]string{{"pid": ""}}, nil
+		}
+		f.globals[`^mIrisRun("`+rid+`","aborted")`] = "1"
+		return []map[string]string{{"pid": pid}}, nil
 	case strings.Contains(sql, "SetGlobal"):
 		f.globals[params[0]] = params[1]
 		return []map[string]string{{"ok": "1"}}, nil
@@ -182,6 +192,38 @@ func TestLoad_MapsDotMToIntDocname(t *testing.T) {
 	// The staged .int must lead with the UDL routine header (else Atelier #16021).
 	if got := api.putBody["ZVPKGINS.int"][0]; got != "ROUTINE ZVPKGINS [Type=INT]" {
 		t.Errorf("ZVPKGINS.int header = %q, want ROUTINE ZVPKGINS [Type=INT]", got)
+	}
+}
+
+// TestRemoteAbort_NoLiveRunReturnsEmpty proves abort is honest: with no run
+// recorded under the prefix, nothing is killed (parity with m-ydb's "no jobs
+// matched" — a synchronous run has already returned by the time abort fires).
+func TestRemoteAbort_NoLiveRunReturnsEmpty(t *testing.T) {
+	tr := New(newFakeAPI())
+	killed, err := tr.Abort(context.Background(), "zzt-nothing")
+	if err != nil {
+		t.Fatalf("Abort: %v", err)
+	}
+	if len(killed) != 0 {
+		t.Errorf("killed = %v, want none", killed)
+	}
+}
+
+// TestRemoteAbort_LiveRunReturnsKilledPid proves abort terminates a run whose
+// process is still registered (pid set, "done" unset) and reports the pid.
+func TestRemoteAbort_LiveRunReturnsKilledPid(t *testing.T) {
+	api := newFakeAPI()
+	api.globals[`^mIrisRun("zzt9","pid")`] = "173733" // a run in flight
+	tr := New(api)
+	killed, err := tr.Abort(context.Background(), "zzt9")
+	if err != nil {
+		t.Fatalf("Abort: %v", err)
+	}
+	if len(killed) != 1 || killed[0] != "173733" {
+		t.Errorf("killed = %v, want [173733]", killed)
+	}
+	if api.globals[`^mIrisRun("zzt9","aborted")`] != "1" {
+		t.Error("abort did not mark the run aborted")
 	}
 }
 

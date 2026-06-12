@@ -27,10 +27,10 @@ func CapsDoc() mdriver.Caps {
 			// M1 — lifecycle + health probes. provision/destroy are advertised but
 			// report unsupported (exit 7) on the remote transport (risk B4).
 			Lifecycle: []string{"up", "down", "restart", "status", "wait", "provision", "destroy"},
-			// M3 — exec over the remote runner substrate. abort is not wired (the
-			// runner has no long-running job model on Atelier yet), so it stays off
-			// caps until implemented (honest-by-construction).
-			Exec: []string{"load", "run", "eval"},
+			// M3 — exec over the remote runner substrate. abort stops a run still
+			// in flight under its ephemeral --prefix (the runner records each run's
+			// $job and terminates a live, not-done process).
+			Exec: []string{"load", "run", "eval", "abort"},
 		},
 		Features: mdriver.Features{
 			Remote:          true,  // IRIS reaches over Atelier REST

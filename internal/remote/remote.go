@@ -210,6 +210,32 @@ func (t *Transport) readEngineError(ctx context.Context, rid string) (*mdriver.E
 	return eng, nil
 }
 
+// Abort stops a run still in flight under the ephemeral prefix (contract
+// exec.abort). The runner records each run's process and clears it on completion,
+// so abort terminates a live, not-yet-done run and reports the pid; a synchronous
+// run that has already returned leaves nothing to stop (killed is empty — parity
+// with m-ydb's "no jobs matched"). Abort is a driver-local exec verb, not a
+// neutral Transport method (the SDK Transport has no Abort) — like m-ydb's
+// Session.Abort.
+func (t *Transport) Abort(ctx context.Context, prefix string) ([]string, error) {
+	if err := t.ensureRunner(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := t.api.Query(ctx, "SELECT m_iris.Abort(?) AS pid", prefix)
+	if err != nil {
+		return nil, err
+	}
+	pid := firstCol(rows, "pid")
+	switch pid {
+	case "DENIED":
+		return nil, fmt.Errorf("remote: runner refused abort — caller lacks the m_iris_runner role / action-query privilege")
+	case "":
+		return nil, nil
+	default:
+		return []string{pid}, nil
+	}
+}
+
 // ReadGlobal reads a single global node via the runner (contract data.get).
 func (t *Transport) ReadGlobal(ctx context.Context, req mdriver.GlobalRef) (mdriver.GlobalNode, error) {
 	if err := t.ensureRunner(ctx); err != nil {

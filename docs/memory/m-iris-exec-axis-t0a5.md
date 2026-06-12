@@ -1,9 +1,10 @@
 ---
 name: m-iris-exec-axis-t0a5
-description: m-iris exec axis (load/run/eval) wired over the remote runner + the device-output capture machinery that closed VSL M0a's T0a.5 IRIS driver-path on foia. Has the hard-won KIDS-over-Atelier device-corruption findings.
-metadata:
+description: "m-iris exec axis (load/run/eval) wired over the remote runner + the device-output capture machinery that closed VSL M0a's T0a.5 IRIS driver-path on foia. Has the hard-won KIDS-over-Atelier device-corruption findings."
+metadata: 
   node_type: memory
   type: project
+  originSessionId: 70bf5dbe-39a1-44d9-9439-a19b1fdfbe39
 ---
 
 **M0a T0a.5 driver-path PROVEN on IRIS FOIA (foia) 2026-06-12.** `v pkg
@@ -31,6 +32,22 @@ argument exec`, exit 2, which the Client swallowed). Fixed, all in m-iris:
   `ROUTINE <name> [Type=INT|MAC|INC]` (idempotent; skips a doc that already leads
   with `ROUTINE `, and `.cls`). **The fake tier missed this — only the live engine
   caught it** (encoded back into the fake's `PutDoc` as a #16021 guard).
+
+## exec abort (added 2026-06-12 — closes the last exec verb)
+Abort over the synchronous Atelier path needs a live target, so the runner now
+records its OWN `$job` into `^mIrisRun(rid,"pid")` (set right after `status`, and
+"done" — set last — marks completion). New `m_iris.Abort(rid)` SqlProc: terminates
+the recorded pid via `$system.Process.Terminate(pid,2)` **iff** pid set ∧ no "done"
+∧ pid≠`$job` (never self) ∧ `^$JOB(pid)` defined (process still live); returns the
+pid, `""` (nothing live — the common case, parity with m-ydb "no jobs matched"), or
+`"DENIED"` (role-fail). `remote.Transport.Abort(ctx,prefix)→[]string` (driver-local,
+NOT an SDK `Transport` verb — same as m-ydb's `Session.Abort`); `exec abort --prefix`
+in exec.go; caps Exec `[load,run,eval,abort]`. **Live-proven** `TestRemoteAbort_
+RealEngine` on m-test-iris: two transports — one runs `hang 30`, the other aborts by
+prefix, gets the pid, the blocked call returns, second abort finds nothing.
+**IRIS gotchas (live-caught):** `$ZCHILD` is a YottaDB-ism — `<SYNTAX>` in IRIS (so
+capture the run's own `$job`, not a JOB'd child's); `^$JOB(pid)` is the M-native
+liveness check; `$system.Process.Terminate(pid,2)`→1 and the process dies.
 
 ## Device-output capture (the deepest part — 4 layered findings)
 Atelier/SQL has no principal device a script's `W` output can be read from. The

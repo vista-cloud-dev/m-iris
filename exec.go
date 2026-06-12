@@ -20,9 +20,10 @@ import (
 // — the substrate the remote spike de-risked; this axis wires it to the CLI so
 // the SDK reference Client (and therefore `v pkg install`) can drive a lifecycle.
 type execCmd struct {
-	Load execLoadCmd `cmd:"" name:"load" help:"Stage routine source into the namespace (Atelier PUT) and compile it; neutral .m → .int. Compile faults surface as engineError."`
-	Run  execRunCmd  `cmd:"" name:"run" help:"Run an entryref (LABEL^ROUTINE) through the runner; args → the formallist. Faults surface as engineError."`
-	Eval execEvalCmd `cmd:"" name:"eval" help:"Evaluate a single M command through the runner. Faults surface as engineError."`
+	Load  execLoadCmd  `cmd:"" name:"load" help:"Stage routine source into the namespace (Atelier PUT) and compile it; neutral .m → .int. Compile faults surface as engineError."`
+	Run   execRunCmd   `cmd:"" name:"run" help:"Run an entryref (LABEL^ROUTINE) through the runner; args → the formallist. Faults surface as engineError."`
+	Eval  execEvalCmd  `cmd:"" name:"eval" help:"Evaluate a single M command through the runner. Faults surface as engineError."`
+	Abort execAbortCmd `cmd:"" name:"abort" help:"Stop a run still in flight under an ephemeral --prefix (the runner terminates its recorded process)."`
 }
 
 type execResult struct {
@@ -88,6 +89,37 @@ type execRunCmd struct {
 
 func (c *execRunCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	return runExec(cc, conn, mdriver.ExecRequest{EntryRef: c.EntryRef, Args: c.Args, Prefix: c.Prefix})
+}
+
+// --- abort -------------------------------------------------------------------
+
+type execAbortCmd struct {
+	Prefix string `help:"Ephemeral-run prefix to abort (the run id passed to 'exec run --prefix')." placeholder:"PREFIX"`
+}
+
+type execAbortResult struct {
+	Killed []string `json:"killed"`
+}
+
+func (c *execAbortCmd) Run(cc *clikit.Context, conn *config.Conn) error {
+	if c.Prefix == "" {
+		return clikit.Fail(clikit.ExitUsage, "NO_PREFIX", "exec abort needs --prefix", "")
+	}
+	tr, err := remoteTransport(conn)
+	if err != nil {
+		return err
+	}
+	killed, err := tr.Abort(context.Background(), c.Prefix)
+	if err != nil {
+		return runtimeErr(err)
+	}
+	return cc.Result(execAbortResult{Killed: nonNil(killed)}, func() {
+		if len(killed) == 0 {
+			fmt.Fprintln(cc.Stdout, cc.Faint("no run in flight under --prefix "+c.Prefix))
+			return
+		}
+		fmt.Fprintln(cc.Stdout, cc.Success(fmt.Sprintf("aborted %d run(s): %s", len(killed), strings.Join(killed, ", "))))
+	})
 }
 
 // --- eval --------------------------------------------------------------------

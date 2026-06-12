@@ -50,6 +50,9 @@ ClassMethod RunRef(rid As %String, ref As %String, args As %String = "") As %Int
 	if '..authorized() quit 7
 	kill ^mIrisRun(rid)
 	set ^mIrisRun(rid,"status")=0
+	// Record THIS process so a concurrent `exec abort --prefix rid` can stop the
+	// run while it is in flight; "done" (set last) tells abort the run finished.
+	set ^mIrisRun(rid,"pid")=$job
 	try {
 		do start^mIrisIO(rid)
 		do @ref
@@ -73,6 +76,7 @@ ClassMethod Eval(rid As %String, cmd As %String) As %Integer [ SqlName = "Eval",
 	if '..authorized() quit 7
 	kill ^mIrisRun(rid)
 	set ^mIrisRun(rid,"status")=0
+	set ^mIrisRun(rid,"pid")=$job
 	try {
 		do start^mIrisIO(rid)
 		xecute cmd
@@ -122,6 +126,23 @@ ClassMethod KillGlobal(ref As %String) As %Integer [ SqlName = "KillGlobal", Sql
 	if '..authorized() quit 7
 	kill @ref
 	quit 1
+}
+
+/// Abort stops a run still in flight under run id `rid`: the run records its
+/// process ($job) in ^mIrisRun(rid,"pid") and sets "done" last, so a run is
+/// abortable iff a pid is recorded, "done" is not yet set, and that process is
+/// still live (^$JOB(pid) defined). It never terminates the caller's own process.
+/// Returns the terminated pid, or "" when nothing was live to stop (the common
+/// case over the synchronous Atelier path — parity with m-ydb's "no jobs matched").
+/// SQL:  SELECT m_iris.Abort(?)
+ClassMethod Abort(rid As %String) As %String [ SqlName = "Abort", SqlProc ]
+{
+	if '..authorized() quit "DENIED"
+	set pid=$get(^mIrisRun(rid,"pid"))
+	if pid=""!$data(^mIrisRun(rid,"done"))!(pid=$job)!'$data(^$JOB(pid)) quit ""
+	do $system.Process.Terminate(pid,2)
+	set ^mIrisRun(rid,"aborted")=1
+	quit pid
 }
 
 /// Ping returns $zversion — a cheap readiness/version probe through the same

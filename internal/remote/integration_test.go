@@ -155,6 +155,89 @@ func TestRemoteExecAxis_RealEngine(t *testing.T) {
 	}
 }
 
+// TestRemoteAbort_RealEngine proves exec.abort terminates a run still in flight
+// on a real IRIS: one transport launches a long (`hang`) Eval that registers its
+// process in ^mIrisRun(rid,"pid"); a second transport aborts it by prefix and
+// reports the terminated pid; the launching call then returns promptly because
+// its server process was killed. (Over the synchronous Atelier path a completed
+// run leaves nothing to abort — this test is the positive, concurrent case.)
+//
+// Gated identically to the spike (M_IRIS_IT=1 + M_IRIS_* connection env).
+func TestRemoteAbort_RealEngine(t *testing.T) {
+	if os.Getenv("M_IRIS_IT") != "1" {
+		t.Skip("set M_IRIS_IT=1 (+ M_IRIS_* connection env) to run the real-engine abort test")
+	}
+	cfg := atelier.Config{
+		BaseURL:   envOr("M_IRIS_BASE_URL", "http://localhost:52773/api/atelier/v1/"),
+		Namespace: envOr("M_IRIS_NAMESPACE", "USER"),
+		User:      envOr("M_IRIS_USER", "_SYSTEM"),
+		Password:  envOr("M_IRIS_PASSWORD", "SYS"),
+		Timeout:   60 * time.Second,
+	}
+	// Two independent clients: one blocks on the long run, the other aborts it.
+	runClient, err := atelier.New(cfg)
+	if err != nil {
+		t.Fatalf("atelier client (run): %v", err)
+	}
+	ctlClient, err := atelier.New(cfg)
+	if err != nil {
+		t.Fatalf("atelier client (ctl): %v", err)
+	}
+	runTr, ctlTr := New(runClient), New(ctlClient)
+	ctx := context.Background()
+	const rid = "zzMIRISABORT"
+
+	t.Cleanup(func() {
+		_, _ = ctlClient.Query(ctx, "SELECT m_iris.KillGlobal(?)", `^mIrisRun("`+rid+`")`)
+	})
+
+	// Launch a long-running run; it sets ^mIrisRun(rid,"pid")=$job then hangs.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = runTr.Exec(ctx, mdriver.ExecRequest{Command: "hang 30", Prefix: rid})
+	}()
+
+	// Wait until the run has registered its process (deploys the runner on the
+	// ctl transport's first read; idempotent with the run transport's deploy).
+	var pid string
+	for i := 0; i < 100; i++ {
+		node, rerr := ctlTr.ReadGlobal(ctx, mdriver.GlobalRef{Ref: `^mIrisRun("` + rid + `","pid")`})
+		if rerr == nil && node.Value != "" {
+			pid = node.Value
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if pid == "" {
+		t.Fatal("run never registered a pid — cannot test abort")
+	}
+
+	killed, err := ctlTr.Abort(ctx, rid)
+	if err != nil {
+		t.Fatalf("Abort: %v", err)
+	}
+	if len(killed) != 1 || killed[0] != pid {
+		t.Fatalf("killed = %v, want [%s]", killed, pid)
+	}
+
+	// The terminated run's blocking call must return promptly now.
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("aborted run did not return after its process was terminated")
+	}
+
+	// A second abort finds nothing live (idempotent / honest).
+	again, err := ctlTr.Abort(ctx, rid)
+	if err != nil {
+		t.Fatalf("second Abort: %v", err)
+	}
+	if len(again) != 0 {
+		t.Errorf("second abort killed = %v, want none", again)
+	}
+}
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

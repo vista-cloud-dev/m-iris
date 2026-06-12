@@ -29,7 +29,8 @@
     "exec": [
       "load",
       "run",
-      "eval"
+      "eval",
+      "abort"
     ],
     "meta": [
       "caps",
