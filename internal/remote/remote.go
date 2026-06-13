@@ -311,11 +311,13 @@ func parseNodes(raw string) ([]mdriver.GlobalNode, error) {
 	return nodes, nil
 }
 
-// getOut reads the captured result-global text for a run, Base64-encoded by the
-// runner so control bytes (a KIDS install's ANSI/terminal output) survive the
-// action/query JSON transport — a raw read truncates at the first non-text byte,
-// dropping the trailing result markers v-pkg parses. IRIS Base64Encode may wrap
-// the encoded text at 76 columns, so strip whitespace before decoding.
+// getOut reads the captured result-global text for a run, UTF-8-then-Base64-encoded
+// by the runner so control bytes (a KIDS install's ANSI/terminal output) survive
+// the action/query JSON transport — a raw read truncates at the first non-text
+// byte, dropping the trailing result markers v-pkg parses. The runner UTF-8-encodes
+// first so wide (Unicode >255) output is byte-safe for Base64; the decoded bytes
+// are UTF-8, which string(raw) turns straight into a Go string. IRIS Base64Encode
+// may wrap the encoded text at 76 columns, so strip whitespace before decoding.
 func (t *Transport) getOut(ctx context.Context, rid string) (string, error) {
 	rows, err := t.api.Query(ctx, "SELECT m_iris.GetOut(?) AS out", rid)
 	if err != nil {

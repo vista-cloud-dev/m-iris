@@ -299,6 +299,55 @@ func TestRemoteData_RealEngine(t *testing.T) {
 	}
 }
 
+// TestRemoteWideChar_RealEngine proves the runner captures and returns output
+// containing wide (Unicode >255) characters. Before the fix, GetOut's
+// $system.Encryption.Base64Encode faulted <ILLEGAL VALUE> on a captured string
+// holding a char >255 (Base64Encode requires an 8-bit byte string), so any suite
+// that WRITEs Unicode — STDURL/STDREGEX/STDJSON/STDXML PASS-line descriptions —
+// came back with no result frame. The runner now UTF-8-encodes the captured
+// string before Base64, so the em-dash round-trips to its UTF-8 form in Stdout.
+//
+// Gated identically (M_IRIS_IT=1 + M_IRIS_* connection env).
+func TestRemoteWideChar_RealEngine(t *testing.T) {
+	if os.Getenv("M_IRIS_IT") != "1" {
+		t.Skip("set M_IRIS_IT=1 (+ M_IRIS_* connection env) to run the real-engine wide-char test")
+	}
+	client, err := atelier.New(atelier.Config{
+		BaseURL:   envOr("M_IRIS_BASE_URL", "http://localhost:52773/api/atelier/v1/"),
+		Namespace: envOr("M_IRIS_NAMESPACE", "USER"),
+		User:      envOr("M_IRIS_USER", "_SYSTEM"),
+		Password:  envOr("M_IRIS_PASSWORD", "SYS"),
+		Timeout:   30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("atelier client: %v", err)
+	}
+	tr := New(client)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_, _ = client.Query(ctx, "SELECT m_iris.KillGlobal(?)", `^mIrisRun("zzwide")`)
+		_ = client.DeleteDoc(ctx, runnerDoc)
+		_ = client.DeleteDoc(ctx, ioHelperDoc)
+	})
+
+	// Write an ASCII marker, a Latin-1 char ($C(233)=é, the 128-255 range), the
+	// em-dash (U+2014 = $C(8212), the >255 repro char that faulted Base64Encode),
+	// and a trailing marker so a truncating capture would drop the tail. All three
+	// ranges must round-trip to their UTF-8 form in Stdout.
+	res, err := tr.Exec(ctx, mdriver.ExecRequest{
+		Command: `W "<<W>>",$C(233),$C(8212),"end"`, Prefix: "zzwide",
+	})
+	if err != nil {
+		t.Fatalf("Exec wide-char eval returned a Go error: %v", err)
+	}
+	if res.EngineError != nil {
+		t.Fatalf("Exec wide-char eval faulted: %+v", res.EngineError)
+	}
+	if want := "<<W>>é—end"; !strings.Contains(res.Stdout, want) {
+		t.Fatalf("Stdout = %q, want it to contain %q (é + em-dash round-trip as UTF-8)", res.Stdout, want)
+	}
+}
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

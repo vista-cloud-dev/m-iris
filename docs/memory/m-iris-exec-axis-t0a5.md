@@ -114,6 +114,28 @@ runner now captures it. Each layer below was a separate live-only failure:
    **`CloseIdleConnections()` and RETRIES** (up to ~2s) so a fresh connection lands
    on a clean process. Both were necessary; either alone still failed.
 
+5. **Wide-char (Unicode >255) output (added 2026-06-13).** Finding 4's
+   `$system.Encryption.Base64Encode` requires an **8-bit byte string** — it faults
+   `<ILLEGAL VALUE>GetOut+2^m.iris.Runner.1` on a captured value holding a char
+   >255. The capture path makes that easy to hit: `wchr(c) do app($char(c))`, so a
+   script's `W $C(8212)` (em-dash) appends a 16-bit char and the whole `out` global
+   becomes a wide string. Surfaced on the VSL T0b.2 IRIS test-in-place leg: m-stdlib
+   suites whose PASS-line descriptions are non-ASCII (STDURL/STDREGEX/STDJSON/STDXML)
+   **errored with no result frame** over the remote path. **Fix: `GetOut` now
+   `$zconvert(...,"O","UTF8")` BEFORE Base64** — UTF-8 leaves ASCII/≤127 bytes
+   identical (KIDS marker path byte-unchanged, exec-axis IT still green) and emits
+   multi-byte sequences for the rest; Base64 is then always byte-safe. The Go
+   `getOut` is **unchanged** — `string(raw)` of the Base64-decoded UTF-8 bytes is
+   already the correct Go (UTF-8) string. Proven by `TestRemoteWideChar_RealEngine`
+   (`W "<<W>>",$C(233),$C(8212),"end"` → Stdout contains `<<W>>é—end`; trailing
+   marker survives — the exact suite failure mode). **NB:** this is the **remote
+   (Atelier) transport** only; the docker/session transport captures via `iris
+   session` stdout markers (a separate path), so a wide-char issue there (if any) is
+   independent of this fix. **Downstream confirmation owed:** re-run
+   `kids-test-in-place.sh iris` on foia (remote) — the 4 suites should now produce
+   frames; m-cli's `m test` has no remote-IRIS transport, so they can't be re-run
+   over remote through the runner here.
+
 **JOB-isolation was tried and rejected:** running the install in a JOB'd child
 keeps the SqlProc's device clean (no lost body) BUT the child's redirect drops at
 `XPDIJ`'s end (its principal differs), truncating capture before the marker. Inline

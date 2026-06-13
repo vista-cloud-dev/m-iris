@@ -23,6 +23,7 @@ Pinned: `m-driver-sdk v0.2.0`. Branch: `m-iris-driver`. Transports: remote (Atel
 | DRV | **public `irisdriver` facade** | ☑ | `New(Config)→(mdriver.Transport,error)` over Atelier REST + runner; the importable seam for in-process embedders (vendor logic stays internal/). **Live-validated vs m-test-iris (2026.1):** New→Health→Exec($zv via result-global) returns the IRIS banner. |
 | CFM | **`meta version` conformance fix** | ☑ | Was the shared `clikit.VersionCmd` (`{version,commit,date,go}`) — non-conformant: contract §5.7 version = `{driver,engine,contract,build}` (caught by `m-driver-conformance`). Replaced with a driver-specific `versionCmd` emitting `{driver:"m-iris",engine:"iris",contract,build{…}}`; clikit untouched (byte-identical). **Conformance now 16/16 live vs m-test-iris (remote).** |
 | CFM2 | **clikit `ResultExit` + doctor envelope/exit** | ☑ | Mirrored the shared clikit fix (byte-identical with m-ydb): `Context.ResultExit(data, exit, text)` so `meta doctor` emits its data envelope with the resolved exit (0/5/6) and `Run` returns `cc.ExitCode()`. doctor's unreachable path now emits `ok=false, exit=6` with process exit 6 (was the latent `cc.Result`-then-`Fail` stdout-exit-0 mismatch). Conformance stays 16/16 live. |
+| FIX | **remote `GetOut` wide-char (Unicode >255) output** | ☑ | **DONE 2026-06-13.** Runner `GetOut` Base64-encoded the captured `^mIrisRun(rid,"out")` directly, but `$system.Encryption.Base64Encode` requires an 8-bit byte string → faulted `<ILLEGAL VALUE>GetOut+2^m.iris.Runner.1` whenever a script WROTE a char >255 (capture path `wchr(c) do app($char(c))` makes `out` a 16-bit string; `W $C(8212)` em-dash repros). Blocked the non-ASCII m-stdlib suites (STDURL/STDREGEX/STDJSON/STDXML) on the VSL T0b.2 IRIS remote leg — they errored with no result frame. **Fix:** `GetOut` now `$zconvert(...,"O","UTF8")` before Base64 (ASCII/≤127 byte-identical → KIDS markers unchanged; multi-byte for the rest → always byte-safe). Go `getOut` unchanged (`string(raw)` of decoded UTF-8 bytes is the correct Go string). New `TestRemoteWideChar_RealEngine` (`W "<<W>>",$C(233),$C(8212),"end"` → `<<W>>é—end`, trailing marker survives); `make test-it` 6/6 RealEngine green, race/vet/gofmt clean. **Remote (Atelier) transport only** — the docker/session transport captures via stdout markers (separate path). Downstream: re-run `kids-test-in-place.sh iris` on foia to confirm the 4 suites now frame. |
 
 **Device-capture note (UPDATED 2026-06-12 — supersedes the old "no IO redirection"
 note):** IRIS `Exec` now CAPTURES device `W` output. The runner's `RunRef`/`Eval`
@@ -37,9 +38,10 @@ caveat:** `EN^XPDIJ` reconfigures the Atelier SQL-gateway device with USE-params
 ReDirectIO can't intercept, so the action/query RESPONSE BODY is lost (HTTP 200 +
 empty body) even though the run completes; the runner therefore records
 `status`/`out`/`error` in `^mIrisRun(rid,*)` and sets `"done"` LAST, and `Exec`
-RECOVERS the outcome from those globals — Base64-encoded (`GetOut`) so control bytes
-survive, retrying on fresh connections (`CloseIdleConnections`) until a clean
-gateway process serves the read. `Health()`+Version remains the portable readiness
+RECOVERS the outcome from those globals — UTF-8-then-Base64-encoded (`GetOut`) so
+control bytes AND wide (Unicode >255) chars survive (see the FIX row), retrying on
+fresh connections (`CloseIdleConnections`) until a clean gateway process serves the
+read. `Health()`+Version remains the portable readiness
 probe; `W $ZV` via `Exec` now also works on IRIS.
 
 **needs SDK:** (record here any shared shape M3+ requires that isn't in the pinned

@@ -89,16 +89,22 @@ ClassMethod Eval(rid As %String, cmd As %String) As %Integer [ SqlName = "Eval",
 	quit ^mIrisRun(rid,"status")
 }
 
-/// GetOut returns ^mIrisRun(rid,"out") Base64-encoded so a runner result that
-/// contains control bytes — a KIDS install's ANSI/terminal output (ESC, CR, page
-/// controls) — survives the action/query JSON transport intact. A raw read of
-/// such a value truncates/mangles at the first non-text byte, dropping the
-/// trailing result markers. (contract: Stdout = runner result-global text.)
+/// GetOut returns ^mIrisRun(rid,"out") UTF-8-encoded then Base64-encoded, so a
+/// runner result survives the action/query JSON transport intact: Base64 keeps
+/// control bytes (a KIDS install's ANSI/terminal output — ESC, CR, page controls)
+/// alive (a raw read truncates/mangles at the first non-text byte, dropping the
+/// trailing result markers), and the $ZCONVERT-to-UTF8 first makes Base64 byte-safe
+/// for WIDE output too — a captured value holding a char >255 (e.g. a suite that
+/// WRITEs an em-dash, $C(8212)) is a 16-bit string, which Base64Encode rejects
+/// outright with <ILLEGAL VALUE>. UTF-8 leaves ASCII/≤127 bytes identical (so the
+/// KIDS marker path is byte-unchanged) and emits multi-byte sequences for the rest;
+/// the Go side reads the Base64-decoded bytes straight into a (UTF-8) string.
+/// (contract: Stdout = runner result-global text.)
 /// SQL:  SELECT m_iris.GetOut(?)
 ClassMethod GetOut(rid As %String) As %String [ SqlName = "GetOut", SqlProc ]
 {
 	if '..authorized() quit ""
-	quit $system.Encryption.Base64Encode($get(^mIrisRun(rid,"out")))
+	quit $system.Encryption.Base64Encode($zconvert($get(^mIrisRun(rid,"out")),"O","UTF8"))
 }
 
 /// GetGlobal returns $get(@ref); ref is a full global reference, e.g.
