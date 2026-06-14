@@ -22,7 +22,7 @@ func TestQuery_RoundTrip(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"status":{"errors":[]},"console":[],"result":{"content":[`+
+		_, _ = io.WriteString(w, `{"status":{"errors":[]},"console":[],"result":{"content":[`+
 			`{"status":"0","error":""}`+
 			`]}}`)
 	}))
@@ -61,7 +61,7 @@ func TestQuery_ServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, `{"status":{"errors":[{"error":"[SQLCODE: <-99>] privilege failure","code":"99"}]},"result":{}}`)
+		_, _ = io.WriteString(w, `{"status":{"errors":[{"error":"[SQLCODE: <-99>] privilege failure","code":"99"}]},"result":{}}`)
 	}))
 	defer srv.Close()
 

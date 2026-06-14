@@ -281,14 +281,14 @@ func (c *lifeWaitCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 
 type lifeProvisionCmd struct{}
 
-func (lifeProvisionCmd) Run(cc *clikit.Context, conn *config.Conn) error {
+func (lifeProvisionCmd) Run(_ *clikit.Context, conn *config.Conn) error {
 	return unsupportedOnRemote(conn, "provision",
 		"create the namespace on the server, then attach with --transport remote")
 }
 
 type lifeDestroyCmd struct{}
 
-func (lifeDestroyCmd) Run(cc *clikit.Context, conn *config.Conn) error {
+func (lifeDestroyCmd) Run(_ *clikit.Context, conn *config.Conn) error {
 	return unsupportedOnRemote(conn, "destroy",
 		"drop the namespace on the server directly; m-iris remote only manages routines")
 }

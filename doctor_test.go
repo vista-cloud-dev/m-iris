@@ -18,7 +18,7 @@ func doctorServer(rootCode int, namespaces []string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "/action/query") {
-			w.Write([]byte(`{"status":{"errors":[]},"result":{"content":[{"one":"1"}]}}`))
+			_, _ = w.Write([]byte(`{"status":{"errors":[]},"result":{"content":[{"one":"1"}]}}`))
 			return
 		}
 		// root descriptor
@@ -27,7 +27,7 @@ func doctorServer(rootCode int, namespaces []string) *httptest.Server {
 			return
 		}
 		nsJSON, _ := json.Marshal(namespaces)
-		w.Write([]byte(`{"status":{"errors":[]},"result":{"content":{` +
+		_, _ = w.Write([]byte(`{"status":{"errors":[]},"result":{"content":{` +
 			`"version":"IRIS for UNIX 2024.1","api":7,"namespaces":` + string(nsJSON) + `}}}`))
 	}))
 }

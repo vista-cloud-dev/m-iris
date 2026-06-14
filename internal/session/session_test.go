@@ -183,7 +183,7 @@ func TestQueryGlobal_DecodesNodeList(t *testing.T) {
 			base64.StdEncoding.EncodeToString([]byte(val)) + "\n"
 	}
 	captured := node(`^mFix("a")`, "1") + node(`^mFix("a","sub")`, "2")
-	fr := &fakeRun{fn: func(stdin string) (CmdOutput, error) {
+	fr := &fakeRun{fn: func(_ string) (CmdOutput, error) {
 		// the walk runs against the principal device, bracketed by the markers
 		return CmdOutput{Stdout: sessionStdout(captured, 0, "")}, nil
 	}}

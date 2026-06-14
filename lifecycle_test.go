@@ -14,7 +14,7 @@ import (
 func rootServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":{"errors":[]},"result":{"content":{` +
+		_, _ = w.Write([]byte(`{"status":{"errors":[]},"result":{"content":{` +
 			`"version":"IRIS for UNIX 2024.1","api":7,"namespaces":["%SYS","USER","VISTA"]}}}`))
 	}))
 }

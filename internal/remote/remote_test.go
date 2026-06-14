@@ -15,7 +15,7 @@ import (
 
 // fakeAPI scripts the runner's SQL surface in-memory: it records PUT/Compile
 // (so we can assert the runner is deployed exactly once) and answers Query by
-// dispatching on the SQL + bound parameters, modelling ^mIrisRun.
+// dispatching on the SQL + bound parameters, modeling ^mIrisRun.
 type fakeAPI struct {
 	puts     []string
 	putBody  map[string][]string // docname → content (last PUT)

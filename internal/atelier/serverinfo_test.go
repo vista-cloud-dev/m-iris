@@ -17,7 +17,7 @@ func TestServerInfo_RoundTrip(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":{"errors":[]},"result":{"content":{` +
+		_, _ = w.Write([]byte(`{"status":{"errors":[]},"result":{"content":{` +
 			`"version":"IRIS for UNIX (Ubuntu Server LTS) 2024.1","api":7,` +
 			`"namespaces":["%SYS","USER","VISTA"]}}}`))
 	}))
