@@ -157,6 +157,6 @@ conformance 16/0 vs the rebuilt m-iris (remote) ✅. New: `exec_test.go` (comman
 `TestLoad_MapsDotMToIntDocname` + header guard, `TestRemoteExecAxis_RealEngine`
 (load→run→read-stdout). See [[m-iris-driver-m0-spike]], [[m-iris-public-facade]].
 
-**Flipping the shared VSL `T0a.5` row to ☑ in m-stdlib's
-`docs/tracking/vsl-implementation-tracker.md` is a coordinator/v-pkg-session
+**Flipping the shared VSL `T0a.5` row to ☑ in the `docs` repo's
+`docs/vsl-msl/vsl-implementation-tracker.md` is a coordinator/v-pkg-session
 action** (not this driver lane).
