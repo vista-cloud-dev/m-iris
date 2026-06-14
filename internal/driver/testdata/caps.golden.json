@@ -1,0 +1,55 @@
+{
+  "engine": "iris",
+  "contract": "1.0",
+  "transports": [
+    "local",
+    "docker",
+    "remote"
+  ],
+  "axes": {
+    "lifecycle": [
+      "up",
+      "down",
+      "restart",
+      "status",
+      "wait",
+      "provision",
+      "destroy"
+    ],
+    "sync": [
+      "list",
+      "pull",
+      "status",
+      "verify",
+      "push",
+      "deploy",
+      "diff",
+      "rm"
+    ],
+    "exec": [
+      "load",
+      "run",
+      "eval",
+      "abort"
+    ],
+    "data": [
+      "get",
+      "set",
+      "kill",
+      "query"
+    ],
+    "meta": [
+      "caps",
+      "version",
+      "info",
+      "schema",
+      "doctor"
+    ]
+  },
+  "features": {
+    "remote": true,
+    "prune": true,
+    "ephemeralPrefix": true,
+    "snapshot": false
+  }
+}

@@ -111,6 +111,13 @@ func New(cfg Config) (*Client, error) {
 // Namespace returns the namespace this client targets.
 func (c *Client) Namespace() string { return c.namespace }
 
+// CloseIdleConnections drops pooled keep-alive connections. The remote exec path
+// calls it after a run that can corrupt the IRIS gateway process's device (a
+// KIDS install reconfigures the principal device, losing that request's response
+// body), so the follow-up result reads open a fresh connection — a clean gateway
+// process — instead of reusing the corrupted one.
+func (c *Client) CloseIdleConnections() { c.hc.CloseIdleConnections() }
+
 // endpoint builds an absolute URL for the given path segments under the base.
 // Segments are kept in URL.Path (decoded form) so URL.String() percent-encodes
 // reserved characters — important for routine names like "%ZVISTA.mac".
@@ -165,27 +172,29 @@ func (c *Client) do(ctx context.Context, method string, u *url.URL, body []byte,
 	if err != nil {
 		return fmt.Errorf("atelier: read response from %s: %w", u.Path, err)
 	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		return fmt.Errorf("atelier: authentication failed (HTTP 401) for %s", u.Path)
+	// Auth failures carry no useful envelope; surface them as typed HTTPErrors so
+	// doctor/lifecycle can tell 401 (bad credential) from 403 (no privilege).
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return &HTTPError{Status: resp.StatusCode, Method: method, Path: u.Path}
 	}
 
 	// Atelier returns its envelope (with status.errors) even on 4xx/5xx, so try
-	// to decode before falling back to a bare HTTP-status error.
+	// to decode before falling back to a typed HTTP-status error.
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
 			if resp.StatusCode >= 400 {
-				return fmt.Errorf("atelier: %s %s: HTTP %d", method, u.Path, resp.StatusCode)
+				return &HTTPError{Status: resp.StatusCode, Method: method, Path: u.Path}
 			}
 			return fmt.Errorf("atelier: decode response from %s: %w", u.Path, err)
 		}
 	} else if resp.StatusCode >= 400 {
-		return fmt.Errorf("atelier: %s %s: HTTP %d", method, u.Path, resp.StatusCode)
+		return &HTTPError{Status: resp.StatusCode, Method: method, Path: u.Path}
 	}
 	if err := out.Status.firstError(); err != nil {
 		return fmt.Errorf("atelier: %s: %w", u.Path, err)
 	}
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("atelier: %s %s: HTTP %d", method, u.Path, resp.StatusCode)
+		return &HTTPError{Status: resp.StatusCode, Method: method, Path: u.Path}
 	}
 	return nil
 }

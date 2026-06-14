@@ -1,0 +1,82 @@
+ROUTINE mIrisIO [Type=INT]
+mIrisIO ;m-iris remote IO-capture helper ;2026-06-12
+ ;; Companion to m.iris.Runner. Atelier/SQL has no principal device a script's
+ ;; WRITE output can be read back from, so the remote runner captures it: before
+ ;; `do @ref` / `xecute`, start() turns on %Device.ReDirectIO and points the
+ ;; principal device's mnemonic space here; every WRITE then calls the w* labels
+ ;; below, which append to ^mIrisRun(rid,"out"). That global is what
+ ;; Transport.Exec returns as ExecResult.Stdout (contract: "Stdout = runner
+ ;; result-global text on IRIS remote") — so a script's `<<VPKG>>key=val` markers,
+ ;; written with WRITE, survive even a KIDS install's `D HOME^%ZIS`/device churn.
+ ;;
+ ;; Teardown MUST NOT throw: a KIDS install leaves the SQL process's device in a
+ ;; mangled state (it emits ANSI terminal control), so `use io` to restore can
+ ;; fault. If that fault escaped, the runner's SqlProc would return HTTP 500 even
+ ;; though `do @ref` ran clean and the markers were captured. So stop() (and
+ ;; start's defensive pre-clear) swallow teardown errors and just guarantee
+ ;; ReDirectIO is OFF before the SqlProc returns its result.
+ quit
+ ;
+start(rid) ;Begin capturing principal-device WRITE output into ^mIrisRun(rid,"out").
+ try { do ##class(%Device).ReDirectIO(0) } catch e1 { }
+ set ^mIrisRun(rid,"out")=$get(^mIrisRun(rid,"out"))
+ set ^||mIrisIO("rid")=rid
+ set ^||mIrisIO("io")=$io
+ set ^||mIrisIO("mn")=##class(%Device).GetMnemonicRoutine()
+ do ##class(%Device).ReDirectIO(1)
+ use $io::("^mIrisIO")
+ quit
+ ;
+stop() ;Stop capturing and restore the prior device + mnemonic — never throwing.
+ ;; Restoring the mnemonic-space routine matters as much as ReDirectIO(0): start()
+ ;; pointed the principal device's mnemonic at ^mIrisIO, and the action/query
+ ;; framework writes its HTTP response through that device. If the mnemonic still
+ ;; pointed here, the response write would dispatch into this routine instead of
+ ;; the socket → HTTP 500. Restore the device's original mnemonic so the response
+ ;; goes out cleanly.
+ try { do ##class(%Device).ReDirectIO(0) } catch e2 { }
+ try {
+  new io,mn
+  set io=$get(^||mIrisIO("io"))
+  set mn=$get(^||mIrisIO("mn"))
+  if io'="" {
+   if mn'="" { use io::("^"_mn) } else { use io }
+  }
+ } catch e3 { }
+ kill ^||mIrisIO
+ quit
+ ;
+install(rid,ref) ;Child-JOB entry: run ref in an isolated process, capturing its
+ ;; output into ^mIrisRun(rid,"out"). A KIDS install (EN^XPDIJ) reconfigures the
+ ;; principal device with USE-params that ReDirectIO does NOT intercept; doing
+ ;; that in the SqlProc's own process corrupts the SQL/HTTP response device, so
+ ;; the action/query returns HTTP 500 even though the install ran clean and the
+ ;; markers were captured. Confining it to a JOB'd child discards that churn the
+ ;; instant the child ends — the parent SqlProc's response device stays pristine.
+ ;; Result rides ^mIrisRun (a global, visible to the parent); "done" signals it.
+ try {
+  do start(rid)
+  do @ref
+  do stop()
+ } catch ex {
+  do stop()
+  set ^mIrisRun(rid,"status")=5
+  set ^mIrisRun(rid,"error")=ex.Name_"|"_$piece(ex.Location,"^",2)_"|"_$piece($piece(ex.Location,"^",1),"+",2)_"|"_ex.DisplayString()
+ }
+ set ^mIrisRun(rid,"done")=1
+ quit
+ ;
+app(s) ;Append s to the active run's out global (no-op if capture is off).
+ new rid
+ set rid=$get(^||mIrisIO("rid"))
+ if rid="" quit
+ set ^mIrisRun(rid,"out")=$get(^mIrisRun(rid,"out"))_s
+ quit
+ ;
+ ;; %Device.ReDirectIO entry points (it dispatches each WRITE to these labels in
+ ;; the current mnemonic-space routine):
+wstr(s) do app(s) quit
+wchr(c) do app($char(c)) quit
+wnl do app($char(13,10)) quit
+wff do app($char(12)) quit
+wtab(n) do app($justify("",$select(n>$x:n-$x,1:0))) quit

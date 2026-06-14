@@ -18,6 +18,19 @@ type Envelope struct {
 	Data          any          `json:"data,omitempty"`
 	Diagnostics   []Diagnostic `json:"diagnostics,omitempty"`
 	Error         *Error       `json:"error,omitempty"`
+	EngineError   *EngineError `json:"engineError,omitempty"`
+}
+
+// EngineError is the driver-contract §7 structured engine fault. On any
+// compile/runtime fault, exec/cover verbs set ok=false AND surface this as a
+// sibling of error, so a RED suite shows the real cause (a <NOROUTINE> at a
+// line) rather than passed:0, failed:0. Mnemonic carries the IRIS <…> /
+// %YDB-E-… code.
+type EngineError struct {
+	Routine  string `json:"routine,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Mnemonic string `json:"mnemonic,omitempty"`
+	Text     string `json:"text,omitempty"`
 }
 
 // Diagnostic is one lint/diagnostic finding (the editor↔CI shared shape).
@@ -47,6 +60,7 @@ type Context struct {
 	th      theme
 	gl      Glyph
 	unicode bool
+	exit    int // process exit recorded by ResultExit; Run returns it
 }
 
 // NewContext resolves the format/color for this invocation from the globals
@@ -102,6 +116,29 @@ func (c *Context) Result(data any, text func()) error {
 	}
 	return nil
 }
+
+// ResultExit renders a command result that carries a deliberate exit code (and
+// thus ok = exit==0): in JSON mode the data envelope with that exit/ok to
+// stdout, otherwise the text closure. Unlike Fail — an error written to stderr
+// with no data — this is for verbs whose payload IS the result even on a
+// non-zero outcome (doctor: a failed check is still a full report; lint /
+// roundtrip / status drift). The command returns the (nil) error from here and
+// nothing else; Run reads ExitCode() for the process code, so the stdout
+// envelope's exit always equals the process exit (driver-contract §2).
+func (c *Context) ResultExit(data any, exit int, text func()) error {
+	c.exit = exit
+	if c.JSON() {
+		return c.emit(Envelope{SchemaVersion: SchemaVersion, Command: c.Command, OK: exit == ExitOK, Exit: exit, Data: data})
+	}
+	if text != nil {
+		text()
+	}
+	return nil
+}
+
+// ExitCode is the process exit a command recorded via ResultExit (ExitOK if it
+// used the plain Result path). Run uses it when a command returns no error.
+func (c *Context) ExitCode() int { return c.exit }
 
 // Diagnostics renders a result that carries lint-style findings.
 func (c *Context) Diagnostics(data any, diags []Diagnostic, text func()) error {

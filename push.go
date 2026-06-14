@@ -7,16 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/vista-cloud-dev/irissync/clikit"
-	"github.com/vista-cloud-dev/irissync/internal/atelier"
-	"github.com/vista-cloud-dev/irissync/internal/config"
-	"github.com/vista-cloud-dev/irissync/internal/lock"
-	"github.com/vista-cloud-dev/irissync/internal/manifest"
-	"github.com/vista-cloud-dev/irissync/internal/mirror"
+	"github.com/vista-cloud-dev/m-iris/clikit"
+	"github.com/vista-cloud-dev/m-iris/internal/atelier"
+	"github.com/vista-cloud-dev/m-iris/internal/config"
+	"github.com/vista-cloud-dev/m-iris/internal/lock"
+	"github.com/vista-cloud-dev/m-iris/internal/manifest"
+	"github.com/vista-cloud-dev/m-iris/internal/mirror"
 )
 
 // pushCmd writes edited routines from the mirror back to IRIS — the sole DB
@@ -35,6 +36,7 @@ import (
 // generate the read-only .int; the manifest entry is refreshed to the new
 // server timestamp so the next status/verify is accurate.
 type pushCmd struct {
+	From      string        `help:"Push routines from this directory instead of the mirror (staged into the mirror on success)." placeholder:"DIR"`
 	Force     bool          `help:"Push even if the server copy changed since pull, or is held by another writer (override the conflict-check and detect-and-defer)."`
 	LockTTL   time.Duration `name:"lock-ttl" default:"15m" help:"Reclaim a stale push lock older than this."`
 	NoCompile bool          `name:"no-compile" help:"Skip the post-import compile (compile is on by default)."`
@@ -73,23 +75,38 @@ func (c *pushCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	}
 	if man == nil {
 		return clikit.Fail(clikit.ExitRuntime, "NO_MANIFEST",
-			"no manifest at "+layout.ManifestPath()+"; run 'irissync pull' first", "push requires a pulled mirror as its conflict-check basis")
+			"no manifest at "+layout.ManifestPath()+"; run 'm-iris sync pull' first", "push requires a pulled mirror as its conflict-check basis")
 	}
 
-	// Candidate routines: the manifest's docnames, filtered, that have a mirror
-	// file on disk. push writes what is in the mirror — it does not invent
-	// routines from thin air.
-	names, err := scopeManifest(man, conn.Filter, conn.Package)
-	if err != nil {
-		return usageErr(err)
-	}
-	present := make([]string, 0, len(names))
-	for _, n := range names {
-		if _, statErr := os.Stat(layout.RoutinePath(n)); statErr == nil {
-			present = append(present, n)
+	// Candidate routines. By default: the manifest's docnames, filtered, that
+	// have a mirror file on disk — push writes what is in the mirror, it does
+	// not invent routines. With --from: the routine files in that directory
+	// (filtered), which may include routines the manifest has never seen (fresh
+	// creates); their content is staged into the mirror before the write so the
+	// rest of push (conflict-check / compile / manifest) runs unchanged.
+	var present []string
+	if c.From != "" {
+		present, err = dirRoutines(c.From, conn.Filter, conn.Package, conn.Type)
+		if err != nil {
+			return usageErr(err)
 		}
+		if !conn.DryRun {
+			if err := stageDir(c.From, layout, present); err != nil {
+				return runtimeErr(err)
+			}
+		}
+	} else {
+		names, scErr := scopeManifest(man, conn.Filter, conn.Package)
+		if scErr != nil {
+			return usageErr(scErr)
+		}
+		for _, n := range names {
+			if _, statErr := os.Stat(layout.RoutinePath(n)); statErr == nil {
+				present = append(present, n)
+			}
+		}
+		sort.Strings(present)
 	}
-	sort.Strings(present)
 
 	acfg, err := conn.Atelier()
 	if err != nil {
@@ -198,9 +215,13 @@ func (c *pushCmd) planPush(ctx context.Context, client *atelier.Client, layout m
 		// Up-to-date short-circuit: the local file already matches the server.
 		// Compare the recorded manifest hash against the live server state via
 		// the timestamp — if nothing changed locally and the server matches, no
-		// PUT is needed. We detect "nothing to push" by comparing the on-disk
-		// hash to the manifest entry (an unchanged file the server still matches).
-		if conf.Kind == manifest.ConflictNone && exists && localMatchesManifest(layout, man, name) && stat.TS == man.Routines[name].ServerTS {
+		// PUT is needed. The "local" file is the --from copy when given, so the
+		// dry-run plan reflects the directory being pushed, not a stale mirror.
+		srcPath := layout.RoutinePath(name)
+		if c.From != "" {
+			srcPath = filepath.Join(c.From, name)
+		}
+		if conf.Kind == manifest.ConflictNone && exists && pathMatchesManifest(srcPath, man, name) && stat.TS == man.Routines[name].ServerTS {
 			p.upToDate = append(p.upToDate, name)
 			continue
 		}
@@ -332,18 +353,60 @@ func (c *pushCmd) emit(cc *clikit.Context, conn *config.Conn, layout mirror.Layo
 	return nil
 }
 
-// localMatchesManifest reports whether the on-disk routine still hashes to the
-// manifest entry (i.e. it was not edited since pull).
-func localMatchesManifest(layout mirror.Layout, man *manifest.Manifest, name string) bool {
+// pathMatchesManifest reports whether the file at path still hashes to the
+// manifest entry for name (i.e. it was not edited since pull).
+func pathMatchesManifest(path string, man *manifest.Manifest, name string) bool {
 	e, ok := man.Routines[name]
 	if !ok {
 		return false
 	}
-	sum, n, err := mirror.HashFile(layout.RoutinePath(name))
+	sum, n, err := mirror.HashFile(path)
 	if err != nil {
 		return false
 	}
 	return sum == e.SHA256 && n == e.Bytes
+}
+
+// dirRoutines lists the routine docnames in dir (files whose extension matches
+// the configured routine type) whose bare name passes the --filter glob and
+// --package prefix. The returned names are sorted docnames (e.g. "DGREG.mac").
+func dirRoutines(dir, glob, pkg, typ string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	ext := "." + typ
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ext) {
+			continue
+		}
+		ok, mErr := match(e.Name(), glob, pkg)
+		if mErr != nil {
+			return nil, mErr
+		}
+		if ok {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// stageDir copies each named routine from dir into the mirror (normalized,
+// atomic), so push's mirror-based read/conflict/manifest path runs unchanged
+// for a --from push.
+func stageDir(dir string, layout mirror.Layout, names []string) error {
+	for _, name := range names {
+		lines, _, _, err := readRoutine(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", name, err)
+		}
+		if _, err := mirror.WriteRoutine(layout.RoutinePath(name), lines); err != nil {
+			return fmt.Errorf("stage %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // updMap builds docname → updatable from a docnames listing. The Atelier `upd`

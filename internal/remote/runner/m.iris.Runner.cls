@@ -1,0 +1,198 @@
+/// m.iris.Runner is the remote execution substrate for the m-iris driver.
+/// (Package "m.iris" — NOT "m_iris": IRIS class names forbid underscores; the
+/// package's dots map to the SQL schema "m_iris", so the SqlProc names below
+/// stay m_iris.*.)
+///
+/// Atelier exposes no raw "run ObjectScript" endpoint, and Go has no official
+/// IRIS Native SDK — so on the `remote` transport ALL ObjectScript (exec, data,
+/// cover, admin) rides this class: its methods are projected as SQL procedures,
+/// invoked via POST .../action/query, and their results are read back out of a
+/// result global. This one class is therefore the entire remote substrate
+/// (driver-plan §5 task 8, risk B2). It is a security boundary, so every entry
+/// point is role-gated AND parameterized (callers bind values, never concatenate).
+///
+/// NB: executable lines avoid spaces after commas — ObjectScript treats a space
+/// inside a command argument as a terminator (a space after a comma in a QUIT
+/// expression triggers #1043 "QUIT argument not allowed").
+///
+/// Result global, keyed by a caller-supplied run id (rid):
+///   ^mIrisRun(rid,"status") = 0 ok | 5 fault | 7 unauthorized
+///   ^mIrisRun(rid,"error")  = "mnemonic|routine|line|text"   (on fault, contract §7)
+Class m.iris.Runner Extends %RegisteredObject
+{
+
+/// authorized reports whether the caller may drive the substrate. Holding the
+/// m_iris_runner role is the gate; _SYSTEM is allowed so a fresh instance works
+/// before the role is provisioned. At deploy, SQL EXECUTE on these procedures is
+/// granted only to m_iris_runner (defense in depth: app-role AND SQL privilege).
+ClassMethod authorized() As %Boolean [ Private ]
+{
+	quit ($SYSTEM.Security.Check("m_iris_runner","USE")'="")||($USERNAME="_SYSTEM")
+}
+
+/// fault records a caught exception into the result global in contract-§7 shape
+/// (mnemonic|routine|line|text) and returns status 5.
+ClassMethod fault(rid As %String, ex As %Exception.AbstractException) As %Integer [ Private ]
+{
+	set loc=ex.Location
+	set routine=$piece(loc,"^",2)
+	set line=$piece($piece(loc,"^",1),"+",2)
+	set ^mIrisRun(rid,"status")=5
+	set ^mIrisRun(rid,"error")=ex.Name_"|"_routine_"|"_line_"|"_ex.DisplayString()
+	quit 5
+}
+
+/// RunRef executes entryref `ref` (e.g. "RUN^STDHARN"). The entryref owns any
+/// payload it writes; this method only drives execution and traps faults.
+/// SQL:  SELECT m_iris.RunRef(?,?,?)
+ClassMethod RunRef(rid As %String, ref As %String, args As %String = "") As %Integer [ SqlName = "RunRef", SqlProc ]
+{
+	if '..authorized() quit 7
+	kill ^mIrisRun(rid)
+	set ^mIrisRun(rid,"status")=0
+	// Record THIS process so a concurrent `exec abort --prefix rid` can stop the
+	// run while it is in flight; "done" (set last) tells abort the run finished.
+	set ^mIrisRun(rid,"pid")=$job
+	try {
+		do start^mIrisIO(rid)
+		do @ref
+		do stop^mIrisIO()
+	} catch ex {
+		do stop^mIrisIO()
+		do ..fault(rid,ex)
+	}
+	// "done" lets the caller recover the outcome from ^mIrisRun even when this
+	// SqlProc's HTTP response body is lost — a KIDS install can corrupt the
+	// response device so the action/query returns an empty body, but the run's
+	// status/out/error are already committed to the global here.
+	set ^mIrisRun(rid,"done")=1
+	quit ^mIrisRun(rid,"status")
+}
+
+/// Eval executes one ObjectScript command line via XECUTE (contract exec.eval).
+/// SQL:  SELECT m_iris.Eval(?,?)
+ClassMethod Eval(rid As %String, cmd As %String) As %Integer [ SqlName = "Eval", SqlProc ]
+{
+	if '..authorized() quit 7
+	kill ^mIrisRun(rid)
+	set ^mIrisRun(rid,"status")=0
+	set ^mIrisRun(rid,"pid")=$job
+	try {
+		do start^mIrisIO(rid)
+		xecute cmd
+		do stop^mIrisIO()
+	} catch ex {
+		do stop^mIrisIO()
+		do ..fault(rid,ex)
+	}
+	set ^mIrisRun(rid,"done")=1
+	quit ^mIrisRun(rid,"status")
+}
+
+/// GetOut returns ^mIrisRun(rid,"out") UTF-8-encoded then Base64-encoded, so a
+/// runner result survives the action/query JSON transport intact: Base64 keeps
+/// control bytes (a KIDS install's ANSI/terminal output — ESC, CR, page controls)
+/// alive (a raw read truncates/mangles at the first non-text byte, dropping the
+/// trailing result markers), and the $ZCONVERT-to-UTF8 first makes Base64 byte-safe
+/// for WIDE output too — a captured value holding a char >255 (e.g. a suite that
+/// WRITEs an em-dash, $C(8212)) is a 16-bit string, which Base64Encode rejects
+/// outright with <ILLEGAL VALUE>. UTF-8 leaves ASCII/≤127 bytes identical (so the
+/// KIDS marker path is byte-unchanged) and emits multi-byte sequences for the rest;
+/// the Go side reads the Base64-decoded bytes straight into a (UTF-8) string.
+/// (contract: Stdout = runner result-global text.)
+/// SQL:  SELECT m_iris.GetOut(?)
+ClassMethod GetOut(rid As %String) As %String [ SqlName = "GetOut", SqlProc ]
+{
+	if '..authorized() quit ""
+	quit $system.Encryption.Base64Encode($zconvert($get(^mIrisRun(rid,"out")),"O","UTF8"))
+}
+
+/// GetGlobal returns $get(@ref); ref is a full global reference, e.g.
+/// "^mIrisRun(""r1"",""status"")". (contract data.get + result-global reads)
+/// SQL:  SELECT m_iris.GetGlobal(?)
+ClassMethod GetGlobal(ref As %String) As %String [ SqlName = "GetGlobal", SqlProc ]
+{
+	if '..authorized() quit ""
+	quit $get(@ref)
+}
+
+/// SetGlobal sets @ref=value (contract data.set, fixture seeding).
+/// SQL:  SELECT m_iris.SetGlobal(?,?)
+ClassMethod SetGlobal(ref As %String, value As %String = "") As %Integer [ SqlName = "SetGlobal", SqlProc ]
+{
+	if '..authorized() quit 7
+	set @ref=value
+	quit 1
+}
+
+/// KillGlobal kills @ref (contract data.kill; ephemeral-prefix teardown).
+/// SQL:  SELECT m_iris.KillGlobal(?)
+ClassMethod KillGlobal(ref As %String) As %Integer [ SqlName = "KillGlobal", SqlProc ]
+{
+	if '..authorized() quit 7
+	kill @ref
+	quit 1
+}
+
+/// Abort stops a run still in flight under run id `rid`: the run records its
+/// process ($job) in ^mIrisRun(rid,"pid") and sets "done" last, so a run is
+/// abortable iff a pid is recorded, "done" is not yet set, and that process is
+/// still live (^$JOB(pid) defined). It never terminates the caller's own process.
+/// Returns the terminated pid, or "" when nothing was live to stop (the common
+/// case over the synchronous Atelier path — parity with m-ydb's "no jobs matched").
+/// SQL:  SELECT m_iris.Abort(?)
+ClassMethod Abort(rid As %String) As %String [ SqlName = "Abort", SqlProc ]
+{
+	if '..authorized() quit "DENIED"
+	set pid=$get(^mIrisRun(rid,"pid"))
+	if pid=""!$data(^mIrisRun(rid,"done"))!(pid=$job)!'$data(^$JOB(pid)) quit ""
+	do $system.Process.Terminate(pid,2)
+	set ^mIrisRun(rid,"aborted")=1
+	quit pid
+}
+
+/// QueryGlobal walks the subtree rooted at `ref` in collation order ($query) and
+/// returns its contained nodes (those whose first $qlength(ref) subscripts match
+/// ref — checked with $name(@cur,bl)=ref) as a node list: one line per node,
+/// "Base64(ref)<TAB>Base64(value)<LF>". Base64 keeps refs/values that hold control
+/// bytes intact across the action/query JSON; the LF/TAB framing is plain text.
+/// order="reverse" walks backward; depth>0 caps the levels below ref (0 =
+/// unlimited); max bounds the node count. The base node is included when it holds
+/// a value. (contract data.query)
+/// SQL:  SELECT m_iris.QueryGlobal(?,?,?)
+ClassMethod QueryGlobal(ref As %String,order As %String = "forward",depth As %Integer = 0,max As %Integer = 100000) As %String [ SqlName = "QueryGlobal", SqlProc ]
+{
+	if '..authorized() quit ""
+	set dir=$select(order="reverse":-1,1:1)
+	set bl=$qlength(ref)
+	set out="",n=0
+	if $data(@ref)#10 set out=..node(ref),n=1
+	set cur=ref
+	for {
+		set cur=$query(@cur,dir)
+		if cur="" quit
+		if $name(@cur,bl)'=ref quit
+		if (depth>0)&(($qlength(cur)-bl)>depth) continue
+		set out=out_..node(cur)
+		set n=n+1
+		if n>=max quit
+	}
+	quit out
+}
+
+/// node serializes one reference as "Base64(ref)<TAB>Base64(value)<LF>".
+ClassMethod node(ref As %String) As %String [ Private ]
+{
+	quit $system.Encryption.Base64Encode(ref)_$char(9)_$system.Encryption.Base64Encode($get(@ref))_$char(10)
+}
+
+/// Ping returns $zversion — a cheap readiness/version probe through the same
+/// substrate, so `doctor` can prove the action/query privilege, not just
+/// reachability (risks C3, C7).
+/// SQL:  SELECT m_iris.Ping()
+ClassMethod Ping() As %String [ SqlName = "Ping", SqlProc ]
+{
+	quit $zversion
+}
+
+}

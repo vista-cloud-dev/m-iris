@@ -90,6 +90,46 @@ func TestPutDocServerError(t *testing.T) {
 	}
 }
 
+// TestPutDocRejectedByStatus is the regression guard for a real IRIS 2026.1
+// finding: a save-time rejection (e.g. #16021 Illegal Header Line on a modern
+// .mac that lacks a `ROUTINE name [Type=MAC]` header) returns HTTP 200 with the
+// reason in the *per-document* result.status, with an empty status.errors[] —
+// so PutDoc must inspect result.status, not just the envelope, or it silently
+// reports success while the routine is never stored.
+func TestPutDocRejectedByStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// HTTP 200, empty status.errors, but result.status carries the rejection
+		// and result.content is "" (a string, not the success [] array).
+		_, _ = io.WriteString(w, `{"status":{"errors":[],"summary":""},"result":{
+			"name":"zzBAD.mac","ts":"","cat":"RTN","enc":false,"content":"",
+			"status":"ERROR #16021: Illegal Header Line: zzBAD ;x"}}`)
+	}))
+	defer srv.Close()
+	_, err := newTestClient(t, srv).PutDoc(context.Background(), "zzBAD.mac", []string{"zzBAD ;x", " q"})
+	if err == nil || !strings.Contains(err.Error(), "#16021") {
+		t.Fatalf("expected the per-doc rejection surfaced, got %v", err)
+	}
+}
+
+// TestStatMissing404 covers the other IRIS 2026.1 shape: a missing document is a
+// bare HTTP 404 (older servers embed "does not exist"/#5002 in status.errors).
+// Stat must read both as not-found (ok=false, no error).
+func TestStatMissing404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"status":{"errors":[]},"result":{}}`)
+	}))
+	defer srv.Close()
+	_, ok, err := newTestClient(t, srv).Stat(context.Background(), "X.mac")
+	if err != nil {
+		t.Fatalf("Stat on a 404 should not error, got %v", err)
+	}
+	if ok {
+		t.Error("expected ok=false for a 404 (missing) doc")
+	}
+}
+
 func TestStat(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

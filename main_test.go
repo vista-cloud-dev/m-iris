@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vista-cloud-dev/irissync/clikit"
-	"github.com/vista-cloud-dev/irissync/internal/config"
+	"github.com/vista-cloud-dev/m-iris/clikit"
+	"github.com/vista-cloud-dev/m-iris/internal/config"
 )
 
 // fakeAtelier serves the read-side endpoints with the given routine contents

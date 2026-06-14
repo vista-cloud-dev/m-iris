@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vista-cloud-dev/irissync/clikit"
-	"github.com/vista-cloud-dev/irissync/internal/atelier"
-	"github.com/vista-cloud-dev/irissync/internal/config"
-	"github.com/vista-cloud-dev/irissync/internal/manifest"
-	"github.com/vista-cloud-dev/irissync/internal/mirror"
+	"github.com/vista-cloud-dev/m-iris/clikit"
+	"github.com/vista-cloud-dev/m-iris/internal/atelier"
+	"github.com/vista-cloud-dev/m-iris/internal/config"
+	"github.com/vista-cloud-dev/m-iris/internal/manifest"
+	"github.com/vista-cloud-dev/m-iris/internal/mirror"
 )
 
 // --- list --------------------------------------------------------------------
@@ -301,7 +301,7 @@ func (statusCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 		renderDiff(cc, d)
 	}, d.Drift(), "DRIFT",
 		fmt.Sprintf("%d new, %d changed, %d deleted — mirror out of sync", len(d.New), len(d.Changed), len(d.Deleted)),
-		"run 'irissync pull' to update the mirror")
+		"run 'm-iris sync pull' to update the mirror")
 }
 
 // --- verify ------------------------------------------------------------------
@@ -327,7 +327,7 @@ func (verifyCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 	}
 	if man == nil {
 		return clikit.Fail(clikit.ExitRuntime, "NO_MANIFEST",
-			"no manifest at "+layout.ManifestPath()+"; run 'irissync pull' first", "")
+			"no manifest at "+layout.ManifestPath()+"; run 'm-iris sync pull' first", "")
 	}
 
 	names, err := scopeManifest(man, conn.Filter, conn.Package)
@@ -368,7 +368,7 @@ func (verifyCmd) Run(cc *clikit.Context, conn *config.Conn) error {
 		}
 	}, drift, "MISMATCH",
 		fmt.Sprintf("%d mismatched, %d missing — mirror does not match the manifest", len(mismatch), len(missing)),
-		"re-run 'irissync pull' or investigate tampering")
+		"re-run 'm-iris sync pull' or investigate tampering")
 }
 
 // --- shared helpers ----------------------------------------------------------
@@ -399,7 +399,7 @@ func runtimeErr(err error) error {
 }
 
 func usageErr(err error) error {
-	return clikit.Fail(clikit.ExitUsage, "BAD_CONFIG", err.Error(), "set flags or IRISSYNC_* env vars")
+	return clikit.Fail(clikit.ExitUsage, "BAD_CONFIG", err.Error(), "set flags or M_IRIS_* env vars")
 }
 
 // selectDocs filters a docnames listing by package prefix and glob filter.
@@ -437,19 +437,26 @@ func scopeManifest(man *manifest.Manifest, glob, pkg string) ([]string, error) {
 }
 
 // match reports whether docname passes the package prefix and glob filter.
-// An empty pkg/glob matches everything.
+// An empty pkg/glob matches everything. The --filter glob is matched against the
+// extension-stripped bare name (driver-contract §5.2, parity with m-ydb), so
+// "DG*"/"DGREG" select DGREG.mac but "*.mac" never matches.
 func match(docname, glob, pkg string) (bool, error) {
 	if pkg != "" && !strings.HasPrefix(docname, pkg) {
 		return false, nil
 	}
 	if glob != "" {
-		ok, err := path.Match(glob, docname)
+		ok, err := path.Match(glob, bareName(docname))
 		if err != nil {
 			return false, fmt.Errorf("invalid --filter %q: %w", glob, err)
 		}
 		return ok, nil
 	}
 	return true, nil
+}
+
+// bareName strips a routine's type extension: "DGREG.mac" → "DGREG".
+func bareName(docname string) string {
+	return strings.TrimSuffix(docname, path.Ext(docname))
 }
 
 func docNames(docs []atelier.DocName) []string {

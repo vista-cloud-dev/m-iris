@@ -3,8 +3,8 @@
 # -trimpath, version stamped via -ldflags, cross-compile matrix, lint, test,
 # schema.
 
-BIN     ?= irissync
-PKG     := github.com/vista-cloud-dev/irissync
+BIN     ?= m-iris
+PKG     := github.com/vista-cloud-dev/m-iris
 LDPKG   := $(PKG)/clikit
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -32,6 +32,21 @@ lint:
 
 test:
 	CGO_ENABLED=1 go test $(GOFLAGS) -race -cover ./...
+
+# Real-engine integration tier (gated). Needs a disposable IRIS container with
+# Atelier reachable. Defaults target the local m-test-iris (CE on port 52774);
+# override IRIS_* to point elsewhere. NEVER point at the shared vista-iris.
+IRIS_BASE_URL ?= http://localhost:52774/api/atelier/v1/
+IRIS_NAMESPACE ?= USER
+IRIS_USER ?= _SYSTEM
+IRIS_PASSWORD ?= testsys
+IRIS_CONTAINER ?= m-test-iris
+IRIS_INSTANCE ?= IRIS
+test-it:
+	M_IRIS_IT=1 M_IRIS_BASE_URL=$(IRIS_BASE_URL) M_IRIS_NAMESPACE=$(IRIS_NAMESPACE) \
+		M_IRIS_USER=$(IRIS_USER) M_IRIS_PASSWORD=$(IRIS_PASSWORD) \
+		M_IRIS_CONTAINER=$(IRIS_CONTAINER) M_IRIS_IRIS_INSTANCE=$(IRIS_INSTANCE) \
+		go test $(GOFLAGS) -count=1 -run RealEngine . ./internal/remote/ ./internal/session/ -v
 
 tidy:
 	go mod tidy
