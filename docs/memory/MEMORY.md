@@ -10,6 +10,11 @@ driver contract, the frozen-SDK-window rhythm) lives in the **`docs` repo's
 `docs/memory/`** + the org/per-repo `CLAUDE.md` — those load as rules; read them
 for how m-iris stays in lockstep with m-ydb via `m-driver-sdk`.
 
+**docs/ layout (org standard set):** how-to guides → `docs/guides/`; this auto-memory
+→ `docs/memory/`; index → `docs/README.md`. The two LIVE Tier-D trackers
+(`docs/m-iris-tracker.md`, `docs/m-iris-driver-status.md`) stay at `docs/` **root** for
+the life of the driver effort (a driver carve-out) — do not archive/move them.
+
 - [m-iris driver M0–M2 + remote spike](m-iris-driver-m0-spike.md) — IRIS driver (D1), branch `m-iris-driver`. M0+M1+M2 done — sync axis 8-verb parity (diff/rm/push --from/bare-name filter); real-IRIS-2026.1 validated (404 + PutDoc result.status bugs fixed, 8c2f010). Atelier-SQL runner substrate gated. Next M3 exec. Pins m-driver-sdk v0.2.0.
 - [m-iris public facade](m-iris-public-facade.md) — NEW `irisdriver.New(Config)→mdriver.Transport` for m-cli/VistaEngine (peer of m-ydb's ydbdriver). Live-validated vs m-test-iris (banner returned). NOTE: the old "IRIS Exec does NOT capture device `W`" rule is **superseded** by [[m-iris-exec-axis-t0a5]] — the runner now redirects device output into `^mIrisRun(rid,"out")`.
 - [data axis (M4 get/set/kill/query)](m-iris-data-axis.md) — **M4 get/set/kill/query DONE (2026-06-12)**, conformance 16/16 remote+docker; export/import still ☐. The crux: `$query` subtree walk with `$name(@cur,$qlength(ref))=ref` containment (the `@cur` indirection is the gotcha — `$qsubscript` takes the string directly, `$name` needs `@`); shared node-list wire format `Base64(ref)\tBase64(value)\n`.
