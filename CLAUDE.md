@@ -16,8 +16,9 @@ session that touches the driver effort.
   entirely until the D3 cutover.)
 
 ## The SDK is pinned — do not touch it mid-spike
-- Consume `github.com/vista-cloud-dev/m-driver-sdk` at the **pinned tagged version**
-  in `go.mod` (currently **v0.2.0**). No `replace` directives, no pseudo-versions.
+- Consume `github.com/vista-cloud-dev/m-driver-sdk` at the **pinned tagged version
+  recorded in `go.mod`** (that file is the single source of truth — don't restate
+  the number here, it goes stale). No `replace` directives, no pseudo-versions.
 - If you need a new shared shape (a type m-cli will read, or that m-ydb must match):
   **do NOT bump the SDK from here.** Stub it locally, record `needs SDK: <shape>`
   in this repo's memory, and surface it for a coordinator session to batch into the
